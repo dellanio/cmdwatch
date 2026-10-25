@@ -32,6 +32,32 @@ em tempo real:
 
 ---
 
+## Download
+
+Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
+(precisa apenas do .NET Framework 4.8, já presente no sistema):
+
+**[⬇ cmdwatch v1.0.0 — cmdwatch.exe (102 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+
+| | |
+|---|---|
+| Versão | 1.0.0 |
+| Tamanho | 102 KB (104.448 bytes) |
+| SHA-256 | `f54e67531826955ba833e338b3de2556f76fb561bc4c724d0690d39962ff5bed` |
+| Página da release | [v1.0.0](https://github.com/dellanio/cmdwatch/releases/tag/v1.0.0) |
+
+Depois de baixar:
+
+```powershell
+cmdwatch.exe gui        # painel grafico do fluxo de execucao
+cmdwatch.exe monitor    # saida no terminal
+cmdwatch.exe --help
+```
+
+> A release também traz o arquivo `cmdwatch.exe.sha256` para conferência do hash.
+
+---
+
 ## Painel gráfico (Windows)
 
 O mesmo motor, agora com uma interface ao vivo para acompanhar a execução dos scripts:
