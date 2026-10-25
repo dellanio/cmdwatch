@@ -1,0 +1,18 @@
+# Toolchain / build (Roslyn baixado pelo build.ps1)
+.build/
+out/
+*.exe
+*.dll
+*.pdb
+
+# Artefatos de execucao
+*.jsonl
+cmdwatch-log.jsonl
+__cmdwatch_trace_*.cmd
+
+# IDE / SO
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
