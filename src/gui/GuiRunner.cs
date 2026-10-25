@@ -13,6 +13,9 @@ namespace CmdWatch.Gui
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // idioma escolhido na ultima execucao (padrao: PT-BR)
+            Lang.Load();
+
             bool hideConsole = ConsoleHider.ShouldHideConsole();
             using (DashboardForm form = new DashboardForm(o))
             {

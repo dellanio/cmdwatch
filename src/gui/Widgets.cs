@@ -25,12 +25,27 @@ namespace CmdWatch.Gui
         }
     }
 
-    /// <summary>Evento formatado do fluxo de comandos (guardado para filtrar por sessao).</summary>
+    /// <summary>
+    /// Entrada do fluxo de comandos. Guarda os dados do evento (nao o texto
+    /// ja formatado) para que a linha possa ser redesenhada quando o usuario
+    /// troca o idioma da interface.
+    /// </summary>
     internal sealed class StreamEntry
     {
         public int Pid;
-        public string Line = "";
-        public Color Color;
+        public WatchEvent Event;      // evento monitorado (null em linhas de banner)
+        public BannerInfo Banner;    // cabecalho do log (null em eventos)
+    }
+
+    /// <summary>Linha de abertura do log, tambem redesenhavel ao trocar o idioma.</summary>
+    internal sealed class BannerInfo
+    {
+        public int Kind;              // 0 = faixa inicial, 1 = aviso de monitoramento
+        public string Version = "";
+        public string Engine = "";
+        public string EngineExtra = "";
+        public string Filter = "";
+        public string LogPath = "";
     }
 
     /// <summary>Paineis com cabecalho em matriz de pixels e moldura arredondada.</summary>
@@ -142,6 +157,123 @@ namespace CmdWatch.Gui
         }
     }
 
+    /// <summary>
+    /// Seletor segmentado (PT-BR | EN) usado no rodape para trocar o idioma da
+    /// interface. O segmento ativo recebe fundo ciano e texto em destaque.
+    /// </summary>
+    internal sealed class NeonToggle : Control
+    {
+        private string[] _options = { "PT-BR", "EN" };
+        private int _index;
+
+        public string Caption = "";
+        public Color Accent = Theme.Cyan;
+        public event Action<int> IndexChanged;
+
+        public NeonToggle()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+            TabStop = true;
+        }
+
+        /// <summary>Indice da opcao ativa. Dispara IndexChanged ao mudar.</summary>
+        public int Index
+        {
+            get { return _index; }
+            set
+            {
+                int v = value;
+                if (v < 0) v = 0;
+                if (v > _options.Length - 1) v = _options.Length - 1;
+                if (_index == v) return;
+                _index = v;
+                Invalidate();
+                if (IndexChanged != null) IndexChanged(_index);
+            }
+        }
+
+        private int CaptionWidth(Graphics g)
+        {
+            if (Caption.Length == 0) return 0;
+            return TextRenderer.MeasureText(g, Caption, Theme.Ui).Width + 10;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+
+            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+            Theme.DrawPanel(g, r, 4, Theme.PanelDeep, Theme.Border);
+
+            int capW = CaptionWidth(g);
+            if (capW > 0)
+            {
+                TextRenderer.DrawText(g, Caption, Theme.Ui,
+                    new Rectangle(3, 0, capW, Height), Theme.Dim,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+
+            int areaX = capW;
+            int areaW = Math.Max(20, Width - areaX - 2);
+            int segW = areaW / _options.Length;
+
+            for (int i = 0; i < _options.Length; i++)
+            {
+                Rectangle seg = new Rectangle(areaX + i * segW + 1, 2, segW - 2, Height - 5);
+                bool on = i == _index;
+                if (on)
+                {
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(38, Accent)))
+                        g.FillRectangle(b, seg);
+                    using (Pen p = new Pen(Color.FromArgb(120, Accent)))
+                        g.DrawRectangle(p, seg);
+                }
+                TextRenderer.DrawText(g, _options[i], Theme.UiBold, seg,
+                    on ? Accent : Theme.Dim,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            int capW;
+            using (Graphics g = CreateGraphics())
+                capW = CaptionWidth(g);
+
+            int areaW = Math.Max(20, Width - capW - 2);
+            int segW = Math.Max(1, areaW / _options.Length);
+            int idx = (e.X - capW) / segW;
+            if (idx < 0) idx = 0;
+            if (idx > _options.Length - 1) idx = _options.Length - 1;
+            Index = idx;
+            Focus();
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Left || keyData == Keys.Right || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Left)
+            {
+                Index = Math.Max(0, _index - 1);
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Right)
+            {
+                Index = Math.Min(_options.Length - 1, _index + 1);
+                e.Handled = true;
+            }
+        }
+    }
+
     /// <summary>Grafico de linhas com duas series (verde e vermelho) sobre grade.</summary>
     internal sealed class LineChart : Control
     {
@@ -244,8 +376,15 @@ namespace CmdWatch.Gui
 
         private int _scroll;
 
-        private static readonly string[] Headers =
-            { "PID", "SCRIPT", "CHAMADOR", "COMANDOS", "LINHA", "INICIO", "FIM" };
+        /// <summary>Cabecalhos das colunas (vêm do dicionario de idioma).</summary>
+        private static string[] Headers()
+        {
+            return new string[]
+            {
+                Lang.T("colPid"), Lang.T("colScript"), Lang.T("colCaller"),
+                Lang.T("colCommands"), Lang.T("colLine"), Lang.T("colStart"), Lang.T("colEnd")
+            };
+        }
 
         public SessionTable()
         {
@@ -281,10 +420,11 @@ namespace CmdWatch.Gui
                 g.DrawLine(p, 0, HeaderH - 1, Width, HeaderH - 1);
 
             int[] w = Columns(Width);
+            string[] headers = Headers();
             int x = 10;
-            for (int i = 0; i < Headers.Length; i++)
+            for (int i = 0; i < headers.Length; i++)
             {
-                TextRenderer.DrawText(g, Headers[i], Theme.UiBold,
+                TextRenderer.DrawText(g, headers[i], Theme.UiBold,
                     new Rectangle(x, 0, w[i] - 6, HeaderH), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 x += w[i];
@@ -292,7 +432,7 @@ namespace CmdWatch.Gui
 
             if (Rows.Count == 0)
             {
-                TextRenderer.DrawText(g, "nenhuma sessao .cmd observada ainda", Theme.Ui,
+                TextRenderer.DrawText(g, Lang.T("noSessions"), Theme.Ui,
                     new Rectangle(10, HeaderH + 10, Width - 20, 20), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 return;
@@ -324,7 +464,7 @@ namespace CmdWatch.Gui
                     r.Pid.ToString(), r.Script, r.Caller,
                     r.Steps.ToString(), r.LastLine > 0 ? r.LastLine.ToString() : "-",
                     Stamp(r.StartedAt),
-                    r.Closed ? Stamp(r.ClosedAt) : "em curso"
+                    r.Closed ? Stamp(r.ClosedAt) : Lang.T("inProgress")
                 };
 
                 int cx = 10;
@@ -345,7 +485,7 @@ namespace CmdWatch.Gui
                 }
 
                 if (focused)
-                    TextRenderer.DrawText(g, "FOCO", Theme.UiBold,
+                    TextRenderer.DrawText(g, Lang.T("focus"), Theme.UiBold,
                         new Rectangle(Width - 56, y, 50, RowHeight), Theme.Cyan,
                         TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }

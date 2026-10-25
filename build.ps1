@@ -36,10 +36,27 @@ $refs = @('mscorlib.dll','System.dll','System.Core.dll','System.Xml.dll','System
 $files = Get-ChildItem $src -Filter '*.cs' -Recurse | ForEach-Object { $_.FullName }
 $exe   = Join-Path $out 'cmdwatch.exe'
 
+# icone do produto: /win32icon define o icone do .exe (Explorer, barra de
+# tarefas) e /resource embute o quadro compacto no assembly para a GUI
+# carregar em runtime (janela e bandeja do Windows).
+$icon     = Join-Path $root 'assets\cmdwatch.ico'
+$iconSmall = Join-Path $root 'assets\cmdwatch-32.ico'
+$extra = @()
+if (Test-Path $icon) {
+    $extra += '/win32icon:"' + $icon + '"'
+    if (Test-Path $iconSmall) {
+        $extra += '/resource:"' + $iconSmall + '",cmdwatch.ico'
+    } else {
+        $extra += '/resource:"' + $icon + '",cmdwatch.ico'
+    }
+} else {
+    Write-Host "aviso: assets\cmdwatch.ico ausente - o exe sairia sem icone" -ForegroundColor Yellow
+}
+
 Write-Host "compilador : $csc"
 Write-Host "fontes     : $($files.Count) arquivo(s)"
 
-& $csc /nologo /optimize+ /platform:anycpu /target:exe /out:"$exe" $refs $files
+& $csc /nologo /optimize+ /platform:anycpu /target:exe /out:"$exe" $refs $extra $files
 if ($LASTEXITCODE -ne 0) { Write-Host "FALHA na compilacao" -ForegroundColor Red; exit 1 }
 
 Write-Host "OK -> $exe" -ForegroundColor Green

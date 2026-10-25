@@ -13,6 +13,7 @@ namespace CmdWatch.Gui
     /// Painel visual do cmdwatch. Mostra o fluxo de execucao de scripts .cmd/.bat:
     /// as sessoes abertas, o detalhe de cada comando executado e o grafico de atividade.
     /// Clicar numa sessao filtra o fluxo; clicar de novo volta a mostrar todas.
+    /// O idioma da interface (PT-BR / EN) e trocavel no rodape.
     /// </summary>
     internal sealed class DashboardForm : Form
     {
@@ -40,16 +41,19 @@ namespace CmdWatch.Gui
         private RichTextBox _stream;
         private LineChart _activity;
         private NeonCheckBox _checkTray;
+        private NeonToggle _lang;
         private NotifyIcon _tray;
+        private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
         private System.Windows.Forms.Timer _tick, _slow;
         private int _streamLines;
         private bool _followTail = true;
         private const int HintH = 34;
+        private const int LangW = 150;
 
         public DashboardForm(Options opts)
         {
             _opts = opts;
-            Text = "cmdwatch - execucao de scripts .cmd/.bat";
+            Text = Lang.T("windowTitle");
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1120, 720);
             BackColor = Theme.Bg;
@@ -58,6 +62,8 @@ namespace CmdWatch.Gui
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             DoubleBuffered = true;
             KeyPreview = true;
+
+            try { Icon = AppIcon.Get(32); } catch { }
 
             BuildUi();
             ClientSize = new Size(1460, 900);
@@ -76,9 +82,9 @@ namespace CmdWatch.Gui
         // ------------------------------------------------------------ UI
         private void BuildUi()
         {
-            _pSessions = new NeonPanel { Title = "SESSOES .CMD", Accent = Theme.Cyan };
-            _pStream = new NeonPanel { Title = "FLUXO DE COMANDOS", Accent = Theme.Cyan };
-            _pActivity = new NeonPanel { Title = "ATIVIDADE .CMD", Accent = Theme.Cyan };
+            _pSessions = new NeonPanel { Title = Lang.T("sessions"), Accent = Theme.Cyan };
+            _pStream = new NeonPanel { Title = Lang.T("flow"), Accent = Theme.Cyan };
+            _pActivity = new NeonPanel { Title = Lang.T("activity"), Accent = Theme.Cyan };
 
             _sessions = new SessionTable();
             _sessions.SelectionChanged += OnSelectionChanged;
@@ -98,20 +104,26 @@ namespace CmdWatch.Gui
             _followTail = true;
             _pStream.Controls.Add(_stream);
 
-            _activity = new LineChart { LabelA = "COMANDOS/S", LabelB = "SESSOES/S", Capacity = 60 };
+            _activity = new LineChart { LabelA = Lang.T("cmdPerSec"), LabelB = Lang.T("sessPerSec"), Capacity = 60 };
             _pActivity.Controls.Add(_activity);
 
             _checkTray = new NeonCheckBox
             {
-                Label = "Enviar ao relogio do Windows e continuar monitorando",
+                Label = Lang.T("trayCheck"),
                 Accent = Theme.Green
             };
             _checkTray.CheckedChanged += OnTrayCheckChanged;
+
+            // seletor de idioma: o indice inicial vem da preferencia salva
+            _lang = new NeonToggle { Caption = Lang.T("langLabel") };
+            _lang.Index = (Lang.Atual == Idioma.En) ? 1 : 0;
+            _lang.IndexChanged += OnLanguageIndexChanged;
 
             Controls.Add(_pSessions);
             Controls.Add(_pStream);
             Controls.Add(_pActivity);
             Controls.Add(_checkTray);
+            Controls.Add(_lang);
 
             LayoutDashboard();
         }
@@ -140,6 +152,7 @@ namespace CmdWatch.Gui
             _pActivity.SetBounds(pad + flowW + pad, midY, Math.Max(240, w - pad * 3 - flowW), midH);
 
             _checkTray.SetBounds(pad + 2, h - pad - HintH + 4, 460, 24);
+            _lang.SetBounds(w - pad - LangW - 2, h - pad - HintH + 4, LangW, 24);
 
             Rectangle sa = _pSessions.PlotArea;
             _sessions.SetBounds(sa.X, sa.Y, sa.Width, sa.Height);
@@ -165,17 +178,19 @@ namespace CmdWatch.Gui
                 string script = "";
                 foreach (SessionRow r in _rows)
                     if (r.Pid == _selectedPid) { script = r.Script; break; }
-                info = "FOCO: " + script + " (pid " + _selectedPid +
-                       ")   -   clique de novo na sessao para voltar a mostrar todas";
+                info = Lang.F("hintFocus", script, _selectedPid);
             }
             else
             {
-                info = "Clique numa sessao para ver apenas o fluxo dela" +
-                       (_paused ? "   -   PAUSADO" : "");
+                info = Lang.T("hintAll") +
+                       (_paused ? "   -   " + Lang.T("paused") : "");
             }
 
-            TextRenderer.DrawText(e.Graphics, info, Theme.Ui,
-                new Rectangle(0, ClientSize.Height - HintH, ClientSize.Width, HintH),
+            // a dica nao invade o seletor de idioma no canto direito
+            Rectangle hint = new Rectangle(0, ClientSize.Height - HintH,
+                Math.Max(200, ClientSize.Width - LangW - 24), HintH);
+
+            TextRenderer.DrawText(e.Graphics, info, Theme.Ui, hint,
                 Theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
 
@@ -223,12 +238,18 @@ namespace CmdWatch.Gui
 
             BuildTray();
 
-            AppendLine("=== cmdwatch " + Program.Version + " - motor " + _engineName +
-                       (_engineName == "polling" ? " (" + _opts.Interval + " ms)" : " (eventos WMI)") +
-                       " - filtro: " + (_opts.Filter.Length == 0 ? "(todos)" : _opts.Filter) +
-                       " - log: " + (_opts.LogPath.Length == 0 ? "(desativado)" : _opts.LogPath) + " ===",
-                       Theme.Cyan, 0);
-            AppendLine("monitorando execucao de scripts .cmd/.bat ...", Theme.Dim, 0);
+            BannerInfo banner = new BannerInfo();
+            banner.Kind = 0;
+            banner.Version = Program.Version;
+            banner.Engine = _engineName;
+            banner.EngineExtra = _engineName == "polling" ? " (" + _opts.Interval + " ms)" : Lang.T("motorWmi");
+            banner.Filter = _opts.Filter.Length == 0 ? Lang.T("filterNone") : _opts.Filter;
+            banner.LogPath = _opts.LogPath.Length == 0 ? Lang.T("logOff") : _opts.LogPath;
+            AppendBanner(banner);
+
+            BannerInfo aviso = new BannerInfo();
+            aviso.Kind = 1;
+            AppendBanner(aviso);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -261,18 +282,41 @@ namespace CmdWatch.Gui
             try
             {
                 _tray = new NotifyIcon();
-                _tray.Icon = SystemIcons.Application;
-                _tray.Text = "cmdwatch - monitor de execucao";
+                Icon ico = AppIcon.Get(24);
+                _tray.Icon = ico != null ? ico : SystemIcons.Application;
+                _tray.Text = Lang.T("trayTitle");
+
                 ContextMenuStrip menu = new ContextMenuStrip();
-                menu.Items.Add("Restaurar painel", null, delegate { RestoreFromTray(); });
-                menu.Items.Add("Abrir arquivo de log", null, delegate { OpenLogFile(); });
+                _miRestore = new ToolStripMenuItem(Lang.T("trayRestore"));
+                _miRestore.Click += delegate { RestoreFromTray(); };
+                _miOpenLog = new ToolStripMenuItem(Lang.T("trayOpenLog"));
+                _miOpenLog.Click += delegate { OpenLogFile(); };
+                _miQuit = new ToolStripMenuItem(Lang.T("trayQuit"));
+                _miQuit.Click += delegate { ExitApp(); };
+                menu.Items.Add(_miRestore);
+                menu.Items.Add(_miOpenLog);
                 menu.Items.Add(new ToolStripSeparator());
-                menu.Items.Add("Sair do cmdwatch", null, delegate { ExitApp(); });
+                menu.Items.Add(_miQuit);
+
                 _tray.ContextMenuStrip = menu;
                 _tray.DoubleClick += delegate { RestoreFromTray(); };
                 _tray.Visible = false;
             }
             catch { _tray = null; }
+        }
+
+        /// <summary>Reaplica os textos da bandeja no idioma corrente.</summary>
+        private void ApplyTrayTexts()
+        {
+            if (_tray == null) return;
+            try
+            {
+                _tray.Text = Lang.T("trayTitle");
+                if (_miRestore != null) _miRestore.Text = Lang.T("trayRestore");
+                if (_miOpenLog != null) _miOpenLog.Text = Lang.T("trayOpenLog");
+                if (_miQuit != null) _miQuit.Text = Lang.T("trayQuit");
+            }
+            catch { }
         }
 
         private void OnTrayCheckChanged(bool value)
@@ -287,9 +331,7 @@ namespace CmdWatch.Gui
             try
             {
                 _tray.Visible = true;
-                _tray.ShowBalloonTip(2500, "cmdwatch",
-                    "Monitorando em segundo plano. Clique no icone da bandeja para restaurar o painel.",
-                    ToolTipIcon.Info);
+                _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayTip"), ToolTipIcon.Info);
             }
             catch { }
             Hide();
@@ -313,7 +355,7 @@ namespace CmdWatch.Gui
                 if (_opts.LogPath.Length > 0 && File.Exists(_opts.LogPath))
                     Process.Start("notepad.exe", "\"" + _opts.LogPath + "\"");
                 else if (_tray != null)
-                    _tray.ShowBalloonTip(2500, "cmdwatch", "Nenhum arquivo de log gerado ainda.", ToolTipIcon.Info);
+                    _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayNoLog"), ToolTipIcon.Info);
             }
             catch { }
         }
@@ -323,6 +365,45 @@ namespace CmdWatch.Gui
             try { if (_tray != null) _tray.Visible = false; } catch { }
             Close();
             Application.Exit();
+        }
+
+        // ------------------------------------------------------- idioma
+        private void OnLanguageIndexChanged(int index)
+        {
+            Lang.Set(index == 1 ? Idioma.En : Idioma.PtBr);
+            Lang.Save();
+            ApplyLanguage();
+        }
+
+        /// <summary>Redesenha toda a interface no idioma escolhido.</summary>
+        private void ApplyLanguage()
+        {
+            Text = Lang.T("windowTitle");
+
+            _pSessions.Title = Lang.T("sessions");
+            _pStream.Title = Lang.T("flow");
+            _pActivity.Title = Lang.T("activity");
+
+            _checkTray.Label = Lang.T("trayCheck");
+            _activity.LabelA = Lang.T("cmdPerSec");
+            _activity.LabelB = Lang.T("sessPerSec");
+            _lang.Caption = Lang.T("langLabel");
+
+            _pSessions.TitleValue = _totalSessions + " " + Lang.T("sessionsShort");
+            _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
+            _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
+
+            _pSessions.Invalidate();
+            _pStream.Invalidate();
+            _pActivity.Invalidate();
+            _activity.Invalidate();
+            _checkTray.Invalidate();
+            _lang.Invalidate();
+            _sessions.Invalidate();
+
+            RebuildStream();
+            ApplyTrayTexts();
+            Invalidate();
         }
 
         // ------------------------------------------------------- eventos
@@ -341,11 +422,7 @@ namespace CmdWatch.Gui
             if (_paused) return;
 
             _evAcc++;
-            string line;
-            Color color;
-            int pid = ev.Session != null ? ev.Session.CmdPid : 0;
-            FormatEvent(ev, out line, out color);
-            AppendLine(line, color, pid);
+            AppendEvent(ev);
 
             if (_log != null)
             {
@@ -403,6 +480,7 @@ namespace CmdWatch.Gui
             r.Steps = s.StepCount;
         }
 
+        /// <summary>Formata um evento na linha do fluxo, no idioma corrente.</summary>
         private void FormatEvent(WatchEvent ev, out string line, out Color color)
         {
             string ts = ev.Timestamp.ToString("HH:mm:ss.fff");
@@ -411,17 +489,17 @@ namespace CmdWatch.Gui
 
             if (ev.Type == "batch_open" && s != null)
             {
-                kind = "SESSAO ";
+                kind = Lang.T("kindSessao");
                 script = s.ScriptName;
                 actor = s.Caller != null ? s.Caller.Name + "(" + s.Caller.Pid + ")" : "?";
-                string purpose = (s.Analysis != null && s.Analysis.Purpose.Length > 0) ? s.Analysis.Purpose : "sem descricao";
+                string purpose = (s.Analysis != null && s.Analysis.Purpose.Length > 0) ? s.Analysis.Purpose : Lang.T("noDescription");
                 detail = purpose;
                 color = Theme.Cyan;
             }
             else if (ev.Type == "batch_step")
             {
                 bool nested = ev.Frame != null && ev.Frame.Depth > 0;
-                kind = nested ? "CHAMADA" : "COMANDO";
+                kind = nested ? Lang.T("kindChamada") : Lang.T("kindComando");
                 script = (ev.Frame != null ? ev.Frame.ScriptName : (s != null ? s.ScriptName : "?")) +
                          (ev.Step != null ? ":" + ev.Step.Line : "");
                 actor = ev.Process != null ? ev.Process.Name + "(" + ev.Process.Pid + ")" : "?";
@@ -430,29 +508,29 @@ namespace CmdWatch.Gui
                 else
                 {
                     string cl = ev.Process != null ? ev.Process.CmdLine : "";
-                    detail = cl.Length > 0 ? Explain.Truncate(cl, 90) : "(sem linha de comando)";
+                    detail = cl.Length > 0 ? Explain.Truncate(cl, 90) : Lang.T("noCmdLine");
                 }
                 color = nested ? Theme.Magenta : Theme.Yellow;
             }
             else if (ev.Type == "batch_close" && s != null)
             {
-                kind = "FIM    ";
+                kind = Lang.T("kindFim");
                 script = s.ScriptName;
                 actor = s.CmdPid.ToString();
                 double dur = DateTime.Now.Subtract(s.StartedAt).TotalSeconds;
-                detail = dur.ToString("0.0") + "s  -  " + s.StepCount + " comando(s)";
+                detail = Lang.F("closed", dur.ToString("0.0"), s.StepCount);
                 color = Theme.Green;
             }
             else
             {
-                kind = "EVENTO ";
+                kind = Lang.T("kindEvento");
                 script = "";
                 actor = "";
                 detail = ev.Message;
                 color = Theme.Text;
             }
 
-            line = ts + "  " + kind + "  " + Pad(script, 24) + " " + Pad(actor, 22) + " " + Explain.Truncate(detail, 62);
+            line = ts + "  " + Pad(kind, 8) + "  " + Pad(script, 24) + " " + Pad(actor, 22) + " " + Explain.Truncate(detail, 62);
         }
 
         private static string Pad(string s, int width)
@@ -463,11 +541,46 @@ namespace CmdWatch.Gui
         }
 
         // ------------------------------------------------------- fluxo
-        private void AppendLine(string line, Color color, int pid)
+        private void AppendEvent(WatchEvent ev)
         {
-            _entries.Add(new StreamEntry { Pid = pid, Line = line, Color = color });
+            int pid = ev.Session != null ? ev.Session.CmdPid : 0;
+            AddEntry(new StreamEntry { Pid = pid, Event = ev });
+        }
+
+        private void AppendBanner(BannerInfo b)
+        {
+            AddEntry(new StreamEntry { Pid = 0, Banner = b });
+        }
+
+        private void AddEntry(StreamEntry en)
+        {
+            _entries.Add(en);
             if (_entries.Count > 4000) _entries.RemoveRange(0, 1000);
-            if (_selectedPid == 0 || pid == _selectedPid) WriteLine(line, color);
+            string line; Color color;
+            FormatEntry(en, out line, out color);
+            if (_selectedPid == 0 || en.Pid == _selectedPid) WriteLine(line, color);
+        }
+
+        /// <summary>Formata uma entrada do fluxo (evento ou banner) no idioma corrente.</summary>
+        private void FormatEntry(StreamEntry en, out string line, out Color color)
+        {
+            if (en.Event != null) { FormatEvent(en.Event, out line, out color); return; }
+
+            BannerInfo b = en.Banner;
+            if (b != null && b.Kind == 1)
+            {
+                line = Lang.T("monitoring");
+                color = Theme.Dim;
+                return;
+            }
+            if (b == null)
+            {
+                line = "";
+                color = Theme.Text;
+                return;
+            }
+            line = Lang.F("startup", b.Version, b.Engine, b.EngineExtra, b.Filter, b.LogPath);
+            color = Theme.Cyan;
         }
 
         private void WriteLine(string line, Color color)
@@ -491,7 +604,10 @@ namespace CmdWatch.Gui
             catch { }
         }
 
-        /// <summary>Redesenha o fluxo aplicando (ou removendo) o filtro de sessao.</summary>
+        /// <summary>
+        /// Redesenha o fluxo aplicando (ou removendo) o filtro de sessao.
+        /// Tambem e usado na troca de idioma: as linhas sao reformateadas.
+        /// </summary>
         private void RebuildStream()
         {
             _stream.Clear();
@@ -501,7 +617,9 @@ namespace CmdWatch.Gui
             {
                 StreamEntry en = _entries[i];
                 if (_selectedPid != 0 && en.Pid != _selectedPid) continue;
-                WriteLine(en.Line, en.Color);
+                string line; Color color;
+                FormatEntry(en, out line, out color);
+                WriteLine(line, color);
             }
         }
 
@@ -509,7 +627,7 @@ namespace CmdWatch.Gui
         {
             _selectedPid = _sessions.SelectedPid;
             RebuildStream();
-            _pStream.TitleValue = _selectedPid == 0 ? "TODAS" : ("PID " + _selectedPid);
+            _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
             _pStream.Invalidate();
             Invalidate();
         }
@@ -557,9 +675,9 @@ namespace CmdWatch.Gui
                 _sessions.Rows = _rows.OrderByDescending(r => r.StartedAt).ToList();
                 _sessions.Invalidate();
 
-                _pSessions.TitleValue = _totalSessions + " SESSOES";
+                _pSessions.TitleValue = _totalSessions + " " + Lang.T("sessionsShort");
                 _pSessions.Invalidate();
-                _pActivity.TitleValue = _totalSteps + " PASSOS";
+                _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
                 _pActivity.Invalidate();
             }
             catch { }

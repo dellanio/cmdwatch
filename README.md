@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.2 — cmdwatch.exe (105 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.3 — cmdwatch.exe (495 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.2 |
-| Tamanho | 105 KB (107.008 bytes) |
-| SHA-256 | `81801b12b74ffff580645a8facb6ce0db1b2f74b25ee1f6a46c48e0fba178055` |
+| Versão | 1.0.3 |
+| Tamanho | 495 KB (506.880 bytes) |
+| SHA-256 | `948370832643027E7C14B5153A0CBDCBF3316B8A767C2E6F5BDC41E07F2F82E5` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -96,6 +96,29 @@ janela para a área de notificação e o cmdwatch **continua monitorando em segu
 (ícone na bandeja: clique para restaurar, botão direito para sair).
 
 Atalhos: `ESPAÇO` pausa · `F5` limpa o fluxo · `ESC` limpa o foco / sai.
+
+### Idioma da interface (PT-BR / EN)
+
+O rodapé tem um seletor segmentado **IDIOMA · PT-BR | EN**. A troca é imediata: títulos das
+áreas, cabeçalhos das colunas, rótulos do gráfico, dica do rodapé, menu da bandeja e as
+linhas do fluxo são redesenhados no idioma escolhido — sem reiniciar o painel.
+
+A preferência fica salva em `%APPDATA%\cmdwatch\ui.cfg` e volta no próximo uso.
+
+> O que troca de idioma é a **interface**. As *explicações dos comandos* (`npm ci` →
+> “instala as dependências…”) vêm do dicionário compartilhado com a CLI e continuam em
+> português — são o conteúdo do produto, não o texto da interface.
+
+### Ícone do produto
+
+O cmdwatch tem ícone próprio: na barra de título, na barra de tarefas, na bandeja e no
+Explorer. É um `>` ciano com cursor verde e o ponto de “monitorando”, desenhado por
+código (`tools\Generate-Icon.ps1`) em 7 resoluções (16 a 256 px) — sem depender de
+imagem ou fonte externa.
+
+O ícone do `.exe` fica nos recursos do PE (`/win32icon`); uma versão compacta
+(16/24/32/48 px) vai embutida no assembly para a janela e a bandeja carregarem em
+runtime.
 
 ### Ver o painel em ação
 
@@ -284,7 +307,7 @@ Uma linha JSON por evento:
 {"ts":"2026-10-25T13:50:56.716","type":"batch_close","cmdPid":5400,"durationMs":3444,"stepCount":7}
 ```
 
-Tipos: `batch_open`, `batch_step`, `batch_call`, `batch_close`.
+Tipos: `batch_open`, `batch_step`, `batch_close`.
 
 ---
 
@@ -320,6 +343,14 @@ estiver em `.build\roslyn`, o `build.ps1` baixa automaticamente — ou use o
 ⚠️ O `csc.exe` do framework é o compilador **C# 5**; o código usa recursos mais novos.
 Use o Roslyn (o `build.ps1` resolve isso).
 
+O `build.ps1` também embute o ícone do produto: `/win32icon` para os recursos do `.exe`
+(Explorer, barra de tarefas) e `/resource` para os recursos gerenciados (janela e
+bandeja). Se `assets\cmdwatch.ico` não existir, o build avisa e sai sem ícone — regere com:
+
+```powershell
+.\tools\Generate-Icon.ps1
+```
+
 Saída: `out/cmdwatch.exe` — um arquivo, sem DLLs, sem runtime extra. Roda em qualquer
 Windows 10/11 com .NET Framework 4.8 (já presente no sistema).
 
@@ -333,10 +364,15 @@ cmdwatch/
 │   ├── NativeProcess.cs Toolhelp + leitura de PEB
 │   ├── Program.cs       CLI, saída humana, modos analyze e trace
 │   └── gui/             painel WinForms (dashboard ao vivo)
-│       ├── Theme.cs         paleta + fonte de matriz 5×7 (títulos em LED)
-│       ├── Widgets.cs       medidores, gráficos, tabela e painéis mini
+│       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
+│       ├── TechTitle.cs     renderizador dos títulos (tracking, gradiente, halo neon)
+│       ├── Widgets.cs       painéis, tabela de sessões, gráfico e o seletor de idioma
+│       ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
+│       ├── AppIcon.cs       carrega o ícone embutido (janela e bandeja)
 │       ├── DashboardForm.cs layout, estado e consumo dos eventos
 │       └── GuiRunner.cs     entrada da GUI e modo escuro da barra de título
+├── assets/              ícones do produto (gerados por tools\Generate-Icon.ps1)
+├── tools/               geração do ícone e captura de tela do painel
 ├── demo/                scripts de demonstração
 ├── docs/dashboard.png   captura do painel
 ├── build.ps1
