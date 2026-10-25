@@ -12,9 +12,10 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        private const string Version = "1.0.0";
+        internal const string Version = "1.0.0";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
+        [STAThread]
         private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
@@ -33,6 +34,9 @@ namespace CmdWatch
                     return RunAnalyze(opts, args.Skip(1).ToArray());
                 case "trace":
                     return RunTrace(opts, args.Skip(1).ToArray());
+                case "gui":
+                case "dashboard":
+                    return RunGui(opts);
                 case "version":
                 case "--version":
                     Console.WriteLine("cmdwatch " + Version);
@@ -55,11 +59,12 @@ namespace CmdWatch
 
 uso:
   cmdwatch monitor [opcoes]        monitora o sistema e reporta cada .cmd aberto
+  cmdwatch gui [opcoes]            painel grafico do fluxo de execucao de .cmd/.bat
   cmdwatch analyze <arquivo.cmd>    explica o que um script faz (analise estatica)
   cmdwatch trace <arquivo.cmd>      executa o script e captura a sequencia exata de comandos
   cmdwatch version
 
-opcoes do monitor:
+opcoes do monitor (tambem valem para o gui):
   --log <arquivo>     arquivo JSONL de saida (padrao: cmdwatch-log.jsonl)
   --interval <ms>     intervalo de amostragem (padrao 50)
   --engine <auto|polling|wmi>  motor de captura (auto detecta)
@@ -315,8 +320,15 @@ opcoes do trace:
             return 0;
         }
 
+        // -------------------------------------------------- painel grafico
+        private static int RunGui(Options o)
+        {
+            if (o.Quiet) o.LogPath = "";
+            return Gui.GuiRunner.Run(o);
+        }
+
         // -------------------------------------------------- helpers
-        private static bool IsAdmin()
+        internal static bool IsAdmin()
         {
             try
             {
@@ -412,7 +424,7 @@ opcoes do trace:
             }
         }
 
-        private static string ToJson(WatchEvent ev)
+        internal static string ToJson(WatchEvent ev)
         {
             BatchSession s = ev.Session;
             var sb = new StringBuilder();

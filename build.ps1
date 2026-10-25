@@ -30,10 +30,10 @@ function Get-Roslyn {
 }
 
 $csc = Get-Roslyn
-$refs = @('mscorlib.dll','System.dll','System.Core.dll','System.Xml.dll','System.Management.dll','System.Data.dll') |
+$refs = @('mscorlib.dll','System.dll','System.Core.dll','System.Xml.dll','System.Management.dll','System.Data.dll','System.Drawing.dll','System.Windows.Forms.dll') |
         ForEach-Object { '/r:' + (Join-Path $fw $_) }
 
-$files = Get-ChildItem $src -Filter '*.cs' | ForEach-Object { $_.FullName }
+$files = Get-ChildItem $src -Filter '*.cs' -Recurse | ForEach-Object { $_.FullName }
 $exe   = Join-Path $out 'cmdwatch.exe'
 
 Write-Host "compilador : $csc"

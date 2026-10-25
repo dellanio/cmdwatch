@@ -32,6 +32,36 @@ em tempo real:
 
 ---
 
+## Painel gráfico (Windows)
+
+O mesmo motor, agora com uma interface ao vivo para acompanhar a execução dos scripts:
+
+![Painel do cmdwatch](docs/dashboard.png)
+
+```powershell
+cmdwatch.exe gui
+```
+
+O painel é **WinForms nativo dentro do mesmo executável** — sem runtime extra, sem navegador,
+sem Electron. Aceita as mesmas opções do `monitor` (`--filter`, `--interval`, `--engine`,
+`--log`, `--quiet`).
+
+| Painel | O que mostra |
+|---|---|
+| **CMDWATCH** (medidores) | sessões ativas, comandos observados, chamadas encadeadas e eventos/segundo |
+| **ATIVIDADE .CMD** | comandos/s (verde) e sessões abertas/s (vermelho) nos últimos 60 s |
+| **SESSÕES .CMD** | cada `.cmd` vivo: PID, script, quem chamou, comandos, última linha e tempo de vida |
+| **FLUXO DE COMANDOS** | o stream de eventos, com a explicação de cada comando em português |
+| **LINHA DO TEMPO** | total acumulado de comandos observados |
+| **Motor / Log / Filtro / Sessões** | estado do motor de captura, arquivo de log, filtro e totais |
+
+Atalhos: `ESPAÇO` pausa, `F5` limpa o fluxo, `ESC` fecha.
+
+> A interface é desenhada à mão em GDI+ (painéis arredondados, gráficos com halo neon e
+> títulos em fonte de matriz 5×7), sem nenhum controle de terceiros.
+
+---
+
 ## Existe software pronto pra isso?
 
 Sim, existem ferramentas **genéricas** de monitoramento de processo, mas nenhuma entrega
@@ -132,6 +162,14 @@ Opções:
 | `--quiet` | — | Não escreve arquivo de log |
 | `--verbose` | — | Despeja todo processo detectado (diagnóstico) |
 
+### Painel gráfico
+
+```powershell
+cmdwatch.exe gui
+```
+
+Painel ao vivo do fluxo de execução de scripts — veja [Painel gráfico](#painel-gráfico-windows).
+
 ### Explicar um script (sem executar)
 
 ```powershell
@@ -222,7 +260,8 @@ estiver em `.build\roslyn`, o `build.ps1` baixa automaticamente — ou use o
 
 ```powershell
 & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:exe /out:out\cmdwatch.exe `
-  /r:System.Management.dll src\Core.cs src\Monitor.cs src\NativeProcess.cs src\Program.cs
+  /r:System.Management.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+  src\Core.cs src\Monitor.cs src\NativeProcess.cs src\Program.cs src\gui\*.cs
 ```
 
 ⚠️ O `csc.exe` do framework é o compilador **C# 5**; o código usa recursos mais novos.
@@ -239,8 +278,14 @@ cmdwatch/
 │   ├── Core.cs          parser de .cmd, dicionário de explicações, JSON
 │   ├── Monitor.cs       engines de captura, atribuição, sessões, árvore de chamadas
 │   ├── NativeProcess.cs Toolhelp + leitura de PEB
-│   └── Program.cs       CLI, saída humana, modos analyze e trace
+│   ├── Program.cs       CLI, saída humana, modos analyze e trace
+│   └── gui/             painel WinForms (dashboard ao vivo)
+│       ├── Theme.cs         paleta + fonte de matriz 5×7 (títulos em LED)
+│       ├── Widgets.cs       medidores, gráficos, tabela e painéis mini
+│       ├── DashboardForm.cs layout, estado e consumo dos eventos
+│       └── GuiRunner.cs     entrada da GUI e modo escuro da barra de título
 ├── demo/                scripts de demonstração
+├── docs/dashboard.png   captura do painel
 ├── build.ps1
 └── out/cmdwatch.exe     <- o executável (arquivo único, sem DLLs)
 ```
