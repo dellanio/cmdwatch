@@ -138,6 +138,20 @@ namespace CmdWatch.Gui
                 (int)(a.G + (b.G - a.G) * t),
                 (int)(a.B + (b.B - a.B) * t));
         }
+
+        /// <summary>Cor de cada papel de linha no fluxo de comandos.</summary>
+        public static Color FlowColor(HumanRole role)
+        {
+            switch (role)
+            {
+                case HumanRole.Open: return Cyan;
+                case HumanRole.Call: return Magenta;
+                case HumanRole.Step: return Yellow;
+                case HumanRole.Close: return Green;
+                case HumanRole.Banner: return Cyan;
+                default: return Text;
+            }
+        }
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.0.3";
+        internal const string Version = "1.0.4";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -132,12 +132,15 @@ opcoes do trace:
             // semeia a tabela de processos para resolver quem chamou os .cmd ja existentes
             watcher.Seed();
 
-            Console.WriteLine("cmdwatch " + Version + " — monitorando execucao de .cmd/.bat");
-            Console.WriteLine("    motor      : " + engine + (engine == "wmi" ? " (privilegiado)" : " (sem admin)"));
-            Console.WriteLine("    intervalo  : " + (engine == "polling" ? o.Interval + " ms" : "evento instantaneo"));
-            Console.WriteLine("    log        : " + (log == null ? "(desativado)" : o.LogPath));
-            if (o.Filter.Length > 0) Console.WriteLine("    filtro     : " + o.Filter);
-            Console.WriteLine("    capturando ... (Ctrl+C para sair)");
+            // cabecalho: o mesmo formato usado no painel grafico
+            RunInfo info = new RunInfo();
+            info.Version = Version;
+            info.Engine = engine;
+            info.IntervalMs = o.Interval;
+            info.Filter = o.Filter;
+            info.LogPath = (log == null) ? "" : o.LogPath;
+            foreach (HumanLine hl in HumanFormat.Banner(info))
+                Console.WriteLine(hl.Text);
             Console.WriteLine();
 
             if (engine == "polling")
@@ -354,76 +357,34 @@ opcoes do trace:
 
         private static void RenderHuman(WatchEvent ev)
         {
-            BatchSession s = ev.Session;
-            if (s == null) return;
-            string ts = ev.Timestamp.ToString("HH:mm:ss.fff");
-
-            if (ev.Type == "batch_open")
+            // o mesmo formato do fluxo do painel grafico (HumanFormat.cs)
+            foreach (HumanLine hl in HumanFormat.Render(ev))
             {
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine("[" + ts + "] >> SESSÃO .CMD ABERTA");
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("           script : " + s.ScriptPath + (s.ScriptArgs.Length > 0 ? " " + s.ScriptArgs : ""));
-                Console.WriteLine("           origem : " + CallerDesc.Describe(s.Caller));
-                if (s.Caller != null)
-                    Console.WriteLine("           chamador: " + s.Caller.Name + " (PID " + s.Caller.Pid + ")" +
-                                      (s.Caller.CmdLine.Length > 0 ? " -> " + Explain.Truncate(s.Caller.CmdLine, 110) : ""));
-                if (s.Chain.Count > 0)
+                if (hl.Role == HumanRole.Body || hl.Role == HumanRole.Banner)
                 {
-                    var parts = s.Chain.Select(c => c.Name + "(" + c.Pid + ")").ToList();
-                    Console.WriteLine("           cadeia : " + string.Join(" -> ", parts.ToArray()));
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    Console.WriteLine(hl.Text);
+                    _lastColor = ConsoleColor.Gray;
+                    continue;
                 }
-                if (s.Analysis != null && s.Analysis.Exists)
-                {
-                    Console.WriteLine("           resumo : " + s.Analysis.Purpose);
-                    Console.WriteLine("           passos : " + s.Analysis.ExecutableSteps + " comandos mapeados no arquivo");
-                }
-                Console.WriteLine();
-                return;
+
+                ConsoleColor old = _lastColor;
+                Console.ForegroundColor = RoleColor(hl.Role);
+                Console.WriteLine(hl.Text);
+                Console.ForegroundColor = old;
+                _lastColor = old;
             }
+        }
 
-            if (ev.Type == "batch_call")
+        private static ConsoleColor RoleColor(HumanRole role)
+        {
+            switch (role)
             {
-                Console.ForegroundColor = ConsoleColor.Magenta;
-                Console.WriteLine("[" + ts + "]   +-> " + (ev.Frame != null ? ev.Frame.ScriptName : "?") +
-                                  (ev.Step != null ? "  (chamado na linha " + ev.Step.Line + " de " + (ev.Frame != null && ev.Frame.Parent != null ? ev.Frame.Parent.ScriptName : "?") + ")" : ""));
-                Console.ForegroundColor = ConsoleColor.Gray;
-                return;
-            }
-
-            if (ev.Type == "batch_step")
-            {
-                ProcInfo c = ev.Process;
-                string who = c == null ? "?" : c.Name;
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("[" + ts + "]   | " + who + (c != null ? " (PID " + c.Pid + ")" : ""));
-                Console.ForegroundColor = ConsoleColor.Gray;
-                if (ev.Frame != null && ev.Frame.Depth > 0)
-                    Console.WriteLine("             em: " + ev.Frame.ScriptName + " (nivel " + ev.Frame.Depth + ")");
-                if (ev.Step != null)
-                {
-                    Console.WriteLine("             linha " + ev.Step.Line + " do script: " + Explain.Truncate(ev.Step.Raw, 100));
-                    Console.WriteLine("             -> " + ev.Step.Meaning);
-                }
-                else
-                {
-                    string cl = c == null ? "" : c.CmdLine;
-                    Console.WriteLine("             comando: " + Explain.Truncate(cl, 100));
-                    string m = Explain.DescribeObserved(cl);
-                    if (m.Length > 0) Console.WriteLine("             -> " + m);
-                }
-                return;
-            }
-
-            if (ev.Type == "batch_close")
-            {
-                double dur = (ev.Timestamp - s.StartedAt).TotalSeconds;
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine("[" + ts + "] ## SESSÃO ENCERRADA  " + s.ScriptName +
-                                  "  (" + dur.ToString("0.0") + "s, " + s.StepCount + " comandos executados" +
-                                  (s.LastLine > 0 ? ", última linha mapeada: " + s.LastLine : "") + ")");
-                Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine();
+                case HumanRole.Open: return ConsoleColor.Cyan;
+                case HumanRole.Call: return ConsoleColor.Magenta;
+                case HumanRole.Step: return ConsoleColor.Yellow;
+                case HumanRole.Close: return ConsoleColor.DarkCyan;
+                default: return ConsoleColor.Gray;
             }
         }
 

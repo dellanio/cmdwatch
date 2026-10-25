@@ -27,25 +27,14 @@ namespace CmdWatch.Gui
 
     /// <summary>
     /// Entrada do fluxo de comandos. Guarda os dados do evento (nao o texto
-    /// ja formatado) para que a linha possa ser redesenhada quando o usuario
-    /// troca o idioma da interface.
+    /// ja formatado) para que a mensagem possa ser redesenhada quando o
+    /// usuario troca o idioma da interface.
     /// </summary>
     internal sealed class StreamEntry
     {
         public int Pid;
-        public WatchEvent Event;      // evento monitorado (null em linhas de banner)
-        public BannerInfo Banner;    // cabecalho do log (null em eventos)
-    }
-
-    /// <summary>Linha de abertura do log, tambem redesenhavel ao trocar o idioma.</summary>
-    internal sealed class BannerInfo
-    {
-        public int Kind;              // 0 = faixa inicial, 1 = aviso de monitoramento
-        public string Version = "";
-        public string Engine = "";
-        public string EngineExtra = "";
-        public string Filter = "";
-        public string LogPath = "";
+        public WatchEvent Event;      // evento monitorado (null no cabecalho do log)
+        public RunInfo Banner;       // cabecalho do log (null em eventos)
     }
 
     /// <summary>Paineis com cabecalho em matriz de pixels e moldura arredondada.</summary>
@@ -271,6 +260,246 @@ namespace CmdWatch.Gui
                 Index = Math.Min(_options.Length - 1, _index + 1);
                 e.Handled = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// Fluxo de comandos desenhado a mao. As mensagens usam o mesmo formato do
+    /// CLI e nao quebram linha (como no terminal); a rolagem vertical e
+    /// horizontal sao proprias, sem as barras do sistema - que ficariam claras
+    /// demais no tema escuro.
+    /// </summary>
+    internal sealed class NeonFlow : Control
+    {
+        private readonly List<HumanLine> _lines = new List<HumanLine>();
+        private int _scrollY;
+        private int _scrollX;
+        private bool _follow = true;
+        private int _charW;
+        private int _maxChars;
+        private bool _dragV, _dragH;
+        private int _dragOffset;
+
+        private const int BarW = 4;
+        private const int PadX = 10;
+
+        public NeonFlow()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.PanelDeep;
+        }
+
+        public int LineHeight { get { return Theme.Mono.Height + 3; } }
+
+        /// <summary>Quantas linhas o fluxo esta exibindo no total.</summary>
+        public int LineCount { get { return _lines.Count; } }
+
+        public int VisibleLines { get { return Math.Max(1, (Height - 6) / LineHeight); } }
+
+        public int MaxScrollY { get { return Math.Max(0, _lines.Count - VisibleLines); } }
+
+        public int MaxScrollX
+        {
+            get
+            {
+                int total = _maxChars * _charW + PadX;
+                return Math.Max(0, total - (Width - BarW));
+            }
+        }
+
+        /// <summary>Substitui todas as linhas (re-render do fluxo).</summary>
+        public void SetLines(List<HumanLine> lines)
+        {
+            _lines.Clear();
+            if (lines != null) _lines.AddRange(lines);
+            Recalc();
+            Clamp();
+            Invalidate();
+        }
+
+        /// <summary>Acrescenta um bloco de linhas no final.</summary>
+        public void Append(List<HumanLine> block)
+        {
+            if (block == null || block.Count == 0) return;
+            _lines.AddRange(block);
+            if (_lines.Count > 4000) _lines.RemoveRange(0, 1000);
+            Recalc();
+            if (_follow) _scrollY = MaxScrollY;
+            else Clamp();
+            Invalidate();
+        }
+
+        public void ClearFlow()
+        {
+            _lines.Clear();
+            _scrollY = 0;
+            _scrollX = 0;
+            _follow = true;
+            Invalidate();
+        }
+
+        private void Recalc()
+        {
+            int max = 0;
+            for (int i = 0; i < _lines.Count; i++)
+                if (_lines[i].Text.Length > max) max = _lines[i].Text.Length;
+            _maxChars = max;
+        }
+
+        private void MeasureChar(Graphics g)
+        {
+            _charW = Math.Max(1, (int)Math.Round(g.MeasureString("M", Theme.Mono).Width));
+        }
+
+        private void Clamp()
+        {
+            if (_scrollY > MaxScrollY) _scrollY = MaxScrollY;
+            if (_scrollY < 0) _scrollY = 0;
+            if (_scrollX > MaxScrollX) _scrollX = MaxScrollX;
+            if (_scrollX < 0) _scrollX = 0;
+        }
+
+        // ------------------------------------------------------ desenho
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.PanelDeep);
+            if (_charW <= 1) MeasureChar(g);
+
+            bool hasH = MaxScrollX > 0;
+            int textW = Width - BarW;
+            int textH = Height - (hasH ? BarW : 0);
+            int lh = LineHeight;
+
+            g.SetClip(new Rectangle(0, 0, textW, textH));
+            for (int i = 0; i < VisibleLines && _scrollY + i < _lines.Count; i++)
+            {
+                HumanLine hl = _lines[_scrollY + i];
+                TextRenderer.DrawText(g, hl.Text, Theme.Mono,
+                    new Rectangle(PadX - _scrollX, 3 + i * lh, textW + _scrollX, lh),
+                    Theme.FlowColor(hl.Role),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine |
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.NoClipping);
+            }
+            g.ResetClip();
+
+            // barra vertical fina
+            if (_lines.Count > VisibleLines)
+            {
+                Rectangle track = new Rectangle(Width - BarW, 0, BarW, textH);
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(35, Theme.Cyan)))
+                    g.FillRectangle(b, track);
+                int thumb = Math.Max(24, track.Height * VisibleLines / Math.Max(1, _lines.Count));
+                int max = MaxScrollY;
+                int y = max == 0 ? 0 : (int)((double)_scrollY / max * (track.Height - thumb));
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Theme.Cyan)))
+                    g.FillRectangle(b, new Rectangle(track.X, y, BarW, thumb));
+            }
+
+            // barra horizontal fina
+            if (hasH)
+            {
+                Rectangle track = new Rectangle(0, Height - BarW, textW, BarW);
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(35, Theme.Cyan)))
+                    g.FillRectangle(b, track);
+                int thumb = Math.Max(24, track.Width * (Width - BarW) / Math.Max(1, _maxChars * _charW + PadX));
+                int max = MaxScrollX;
+                int x = max == 0 ? 0 : (int)((double)_scrollX / max * (track.Width - thumb));
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Theme.Cyan)))
+                    g.FillRectangle(b, new Rectangle(x, track.Y, thumb, BarW));
+            }
+        }
+
+        private Rectangle VerticalTrack()
+        {
+            return new Rectangle(Width - BarW, 0, BarW, Height);
+        }
+
+        private Rectangle HorizontalTrack()
+        {
+            return new Rectangle(0, Height - BarW, Width - BarW, BarW);
+        }
+
+        // ---------------------------------------------------- interacao
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            int step = e.Delta / 120 * 3;
+            if (step == 0) step = e.Delta > 0 ? 1 : -1;
+            if ((ModifierKeys & Keys.Shift) != 0) { ScrollXBy(step * _charW * 2); return; }
+            ScrollYBy(step);
+        }
+
+        public void ScrollYBy(int delta)
+        {
+            _scrollY += delta;
+            Clamp();
+            _follow = _scrollY >= MaxScrollY;
+            Invalidate();
+        }
+
+        public void ScrollXBy(int delta)
+        {
+            _scrollX += delta;
+            Clamp();
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            Rectangle v = VerticalTrack();
+            Rectangle h = HorizontalTrack();
+            if (v.Contains(e.Location) && _lines.Count > VisibleLines)
+            {
+                _dragV = true;
+                _dragOffset = e.Y - v.Y;
+            }
+            else if (h.Contains(e.Location) && MaxScrollX > 0)
+            {
+                _dragH = true;
+                _dragOffset = e.X - h.X;
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_dragV)
+            {
+                Rectangle v = VerticalTrack();
+                int thumb = Math.Max(24, v.Height * VisibleLines / Math.Max(1, _lines.Count));
+                int usable = Math.Max(1, v.Height - thumb);
+                int rel = e.Y - v.Y - _dragOffset;
+                if (rel < 0) rel = 0;
+                if (rel > usable) rel = usable;
+                int max = MaxScrollY;
+                _scrollY = max == 0 ? 0 : (int)((double)rel / usable * max);
+                _follow = _scrollY >= max;
+                Invalidate();
+            }
+            else if (_dragH)
+            {
+                Rectangle h = HorizontalTrack();
+                int total = Math.Max(1, _maxChars * _charW + PadX);
+                int thumb = Math.Max(24, h.Width * (Width - BarW) / total);
+                int usable = Math.Max(1, h.Width - thumb);
+                int rel = e.X - h.X - _dragOffset;
+                if (rel < 0) rel = 0;
+                if (rel > usable) rel = usable;
+                int max = MaxScrollX;
+                _scrollX = max == 0 ? 0 : (int)((double)rel / usable * max);
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            _dragV = false;
+            _dragH = false;
         }
     }
 

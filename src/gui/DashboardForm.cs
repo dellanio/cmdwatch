@@ -38,15 +38,13 @@ namespace CmdWatch.Gui
         // controles
         private NeonPanel _pSessions, _pStream, _pActivity;
         private SessionTable _sessions;
-        private RichTextBox _stream;
+        private NeonFlow _stream;
         private LineChart _activity;
         private NeonCheckBox _checkTray;
         private NeonToggle _lang;
         private NotifyIcon _tray;
         private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
         private System.Windows.Forms.Timer _tick, _slow;
-        private int _streamLines;
-        private bool _followTail = true;
         private const int HintH = 34;
         private const int LangW = 150;
 
@@ -90,18 +88,7 @@ namespace CmdWatch.Gui
             _sessions.SelectionChanged += OnSelectionChanged;
             _pSessions.Controls.Add(_sessions);
 
-            _stream = new RichTextBox();
-            _stream.BackColor = Theme.PanelDeep;
-            _stream.ForeColor = Theme.Text;
-            _stream.Font = Theme.Mono;
-            _stream.BorderStyle = BorderStyle.None;
-            _stream.ReadOnly = true;
-            _stream.DetectUrls = false;
-            _stream.WordWrap = true;
-            _stream.ScrollBars = RichTextBoxScrollBars.None;
-            _stream.TabStop = false;
-            _stream.MouseWheel += OnStreamMouseWheel;
-            _followTail = true;
+            _stream = new NeonFlow();
             _pStream.Controls.Add(_stream);
 
             _activity = new LineChart { LabelA = Lang.T("cmdPerSec"), LabelB = Lang.T("sessPerSec"), Capacity = 60 };
@@ -147,7 +134,9 @@ namespace CmdWatch.Gui
 
             _pSessions.SetBounds(pad, sessY, w - pad * 2, sessH);
 
-            int flowW = (int)((w - pad * 3) * 0.60);
+            // o fluxo usa o formato do CLI (linhas longas, sem quebra): ganha
+            // mais largura e o grafico de atividade se ajusta no resto
+            int flowW = (int)((w - pad * 3) * 0.70);
             _pStream.SetBounds(pad, midY, flowW, midH);
             _pActivity.SetBounds(pad + flowW + pad, midY, Math.Max(240, w - pad * 3 - flowW), midH);
 
@@ -238,18 +227,15 @@ namespace CmdWatch.Gui
 
             BuildTray();
 
-            BannerInfo banner = new BannerInfo();
-            banner.Kind = 0;
-            banner.Version = Program.Version;
-            banner.Engine = _engineName;
-            banner.EngineExtra = _engineName == "polling" ? " (" + _opts.Interval + " ms)" : Lang.T("motorWmi");
-            banner.Filter = _opts.Filter.Length == 0 ? Lang.T("filterNone") : _opts.Filter;
-            banner.LogPath = _opts.LogPath.Length == 0 ? Lang.T("logOff") : _opts.LogPath;
-            AppendBanner(banner);
-
-            BannerInfo aviso = new BannerInfo();
-            aviso.Kind = 1;
-            AppendBanner(aviso);
+            // cabecalho no mesmo formato do CLI
+            RunInfo info = new RunInfo();
+            info.Version = Program.Version;
+            info.Engine = _engineName;
+            info.IntervalMs = _opts.Interval;
+            info.Filter = _opts.Filter;
+            info.LogPath = _opts.LogPath;
+            info.IsGui = true;
+            AppendBanner(info);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -272,7 +258,7 @@ namespace CmdWatch.Gui
                 return true;
             }
             if (keyData == Keys.Space) { _paused = !_paused; Invalidate(); return true; }
-            if (keyData == Keys.F5) { _entries.Clear(); _stream.Clear(); _streamLines = 0; return true; }
+            if (keyData == Keys.F5) { _entries.Clear(); _stream.ClearFlow(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
@@ -480,66 +466,6 @@ namespace CmdWatch.Gui
             r.Steps = s.StepCount;
         }
 
-        /// <summary>Formata um evento na linha do fluxo, no idioma corrente.</summary>
-        private void FormatEvent(WatchEvent ev, out string line, out Color color)
-        {
-            string ts = ev.Timestamp.ToString("HH:mm:ss.fff");
-            BatchSession s = ev.Session;
-            string kind, script, actor, detail;
-
-            if (ev.Type == "batch_open" && s != null)
-            {
-                kind = Lang.T("kindSessao");
-                script = s.ScriptName;
-                actor = s.Caller != null ? s.Caller.Name + "(" + s.Caller.Pid + ")" : "?";
-                string purpose = (s.Analysis != null && s.Analysis.Purpose.Length > 0) ? s.Analysis.Purpose : Lang.T("noDescription");
-                detail = purpose;
-                color = Theme.Cyan;
-            }
-            else if (ev.Type == "batch_step")
-            {
-                bool nested = ev.Frame != null && ev.Frame.Depth > 0;
-                kind = nested ? Lang.T("kindChamada") : Lang.T("kindComando");
-                script = (ev.Frame != null ? ev.Frame.ScriptName : (s != null ? s.ScriptName : "?")) +
-                         (ev.Step != null ? ":" + ev.Step.Line : "");
-                actor = ev.Process != null ? ev.Process.Name + "(" + ev.Process.Pid + ")" : "?";
-                if (ev.Step != null && ev.Step.Meaning.Length > 0)
-                    detail = ev.Step.Raw + "  ->  " + ev.Step.Meaning;
-                else
-                {
-                    string cl = ev.Process != null ? ev.Process.CmdLine : "";
-                    detail = cl.Length > 0 ? Explain.Truncate(cl, 90) : Lang.T("noCmdLine");
-                }
-                color = nested ? Theme.Magenta : Theme.Yellow;
-            }
-            else if (ev.Type == "batch_close" && s != null)
-            {
-                kind = Lang.T("kindFim");
-                script = s.ScriptName;
-                actor = s.CmdPid.ToString();
-                double dur = DateTime.Now.Subtract(s.StartedAt).TotalSeconds;
-                detail = Lang.F("closed", dur.ToString("0.0"), s.StepCount);
-                color = Theme.Green;
-            }
-            else
-            {
-                kind = Lang.T("kindEvento");
-                script = "";
-                actor = "";
-                detail = ev.Message;
-                color = Theme.Text;
-            }
-
-            line = ts + "  " + Pad(kind, 8) + "  " + Pad(script, 24) + " " + Pad(actor, 22) + " " + Explain.Truncate(detail, 62);
-        }
-
-        private static string Pad(string s, int width)
-        {
-            if (s == null) s = "";
-            if (s.Length > width) s = s.Substring(0, Math.Max(1, width - 1)) + "~";
-            return s.PadRight(width);
-        }
-
         // ------------------------------------------------------- fluxo
         private void AppendEvent(WatchEvent ev)
         {
@@ -547,80 +473,42 @@ namespace CmdWatch.Gui
             AddEntry(new StreamEntry { Pid = pid, Event = ev });
         }
 
-        private void AppendBanner(BannerInfo b)
+        private void AppendBanner(RunInfo info)
         {
-            AddEntry(new StreamEntry { Pid = 0, Banner = b });
+            AddEntry(new StreamEntry { Pid = 0, Banner = info });
         }
 
         private void AddEntry(StreamEntry en)
         {
             _entries.Add(en);
             if (_entries.Count > 4000) _entries.RemoveRange(0, 1000);
-            string line; Color color;
-            FormatEntry(en, out line, out color);
-            if (_selectedPid == 0 || en.Pid == _selectedPid) WriteLine(line, color);
+            List<HumanLine> lines = FormatEntry(en);
+            if (_selectedPid == 0 || en.Pid == _selectedPid) _stream.Append(lines);
         }
 
-        /// <summary>Formata uma entrada do fluxo (evento ou banner) no idioma corrente.</summary>
-        private void FormatEntry(StreamEntry en, out string line, out Color color)
+        /// <summary>Formata uma entrada do fluxo (evento ou cabecalho) no idioma corrente.</summary>
+        private static List<HumanLine> FormatEntry(StreamEntry en)
         {
-            if (en.Event != null) { FormatEvent(en.Event, out line, out color); return; }
-
-            BannerInfo b = en.Banner;
-            if (b != null && b.Kind == 1)
-            {
-                line = Lang.T("monitoring");
-                color = Theme.Dim;
-                return;
-            }
-            if (b == null)
-            {
-                line = "";
-                color = Theme.Text;
-                return;
-            }
-            line = Lang.F("startup", b.Version, b.Engine, b.EngineExtra, b.Filter, b.LogPath);
-            color = Theme.Cyan;
-        }
-
-        private void WriteLine(string line, Color color)
-        {
-            try
-            {
-                _stream.Select(_stream.TextLength, 0);
-                _stream.SelectionColor = color;
-                _stream.AppendText(line + Environment.NewLine);
-                _stream.SelectionColor = Theme.Text;
-                if (_followTail) _stream.ScrollToCaret();
-                _streamLines++;
-                if (_streamLines > 3000)
-                {
-                    int cut = _stream.GetFirstCharIndexFromLine(800);
-                    _stream.Select(0, cut);
-                    _stream.SelectedText = "";
-                    _streamLines -= 800;
-                }
-            }
-            catch { }
+            if (en.Event != null) return HumanFormat.Render(en.Event);
+            if (en.Banner != null) return HumanFormat.Banner(en.Banner);
+            return new List<HumanLine>();
         }
 
         /// <summary>
         /// Redesenha o fluxo aplicando (ou removendo) o filtro de sessao.
-        /// Tambem e usado na troca de idioma: as linhas sao reformateadas.
+        /// Tambem e usado na troca de idioma: as mensagens sao reformuladas.
         /// </summary>
         private void RebuildStream()
         {
-            _stream.Clear();
-            _streamLines = 0;
+            List<HumanLine> all = new List<HumanLine>();
             int start = Math.Max(0, _entries.Count - 2000);
             for (int i = start; i < _entries.Count; i++)
             {
                 StreamEntry en = _entries[i];
                 if (_selectedPid != 0 && en.Pid != _selectedPid) continue;
-                string line; Color color;
-                FormatEntry(en, out line, out color);
-                WriteLine(line, color);
+                all.AddRange(FormatEntry(en));
             }
+            _stream.SetLines(all);
         }
 
         private void OnSelectionChanged()
@@ -630,24 +518,6 @@ namespace CmdWatch.Gui
             _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
             _pStream.Invalidate();
             Invalidate();
-        }
-
-        private void OnStreamMouseWheel(object sender, MouseEventArgs e)
-        {
-            try
-            {
-                int lines = _stream.Lines.Length;
-                if (lines < 2) return;
-                int current = _stream.GetLineFromCharIndex(_stream.SelectionStart);
-                int target = current + ((e.Delta > 0) ? -3 : 3);
-                if (target < 0) target = 0;
-                if (target > lines - 1) target = lines - 1;
-                int idx = _stream.GetFirstCharIndexFromLine(target);
-                _stream.Select(idx, 0);
-                _stream.ScrollToCaret();
-                _followTail = target >= lines - 1;
-            }
-            catch { }
         }
 
         // -------------------------------------------------------- timers

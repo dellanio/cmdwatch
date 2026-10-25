@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.3 — cmdwatch.exe (495 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.4 — cmdwatch.exe (498 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.3 |
-| Tamanho | 495 KB (506.880 bytes) |
-| SHA-256 | `948370832643027E7C14B5153A0CBDCBF3316B8A767C2E6F5BDC41E07F2F82E5` |
+| Versão | 1.0.4 |
+| Tamanho | 498 KB (509.952 bytes) |
+| SHA-256 | `F9EB4D5BB88520FDC6E17EDB27558246D63973D6155589A2ED425987ADDCA44C` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -80,8 +80,37 @@ sem Electron. Aceita as mesmas opções do `monitor` (`--filter`, `--interval`, 
 | Área | O que mostra |
 |---|---|
 | **SESSÕES .CMD** | Uma linha por script `.cmd` executado: PID, script, quem chamou, comandos observados, última linha mapeada, **data/hora de início** e **data/hora de término** (`em curso` enquanto roda) |
-| **FLUXO DE COMANDOS** | Todos os comandos observados, com a explicação em português. Por padrão mostra **todas as sessões**, igual ao `monitor` do CLI |
+| **FLUXO DE COMANDOS** | As mensagens do cmdwatch **no mesmo formato do `monitor` do CLI** — cabeçalho, sessão aberta com script/origem/chamador/cadeia/resumo/passos, e cada comando com a linha do script e a explicação |
 | **ATIVIDADE .CMD** | Comandos/s (verde) e sessões abertas/s (vermelho) nos últimos 60 s |
+
+### O fluxo fala a língua do terminal
+
+O *FLUXO DE COMANDOS* é a **mesma saída do `cmdwatch monitor`**, linha a linha — o que
+você lê no terminal é exatamente o que aparece no painel:
+
+```
+[13:50:53.272] >> SESSÃO .CMD ABERTA
+           script : C:\projetos\glosa\release.cmd
+           origem : Explorer do Windows (abertura por duplo clique ou pelo menu de contexto)
+           chamador: explorer.exe (PID 10312) -> C:\WINDOWS\Explorer.EXE
+           cadeia : explorer.exe(10312) -> MiniMax Code.exe(1468)
+           resumo : "=== Orquestrador de release ===", publica/implanta artefatos, e chama outros scripts
+           passos : 9 comandos mapeados no arquivo
+
+[13:50:53.438]   | node.exe (PID 10648)
+             em: build.cmd (nivel 1)
+             linha 3 do script: call npm run build
+             -> roda o script "build" definido no package.json
+
+[13:50:56.716] ## SESSÃO ENCERRADA  release.cmd  (3,5s, 7 comandos executados)
+```
+
+O formato é gerado por um módulo só (`src/HumanFormat.cs`), usado tanto pelo CLI
+quanto pelo painel — os dois não podem divergir.
+
+As linhas **não quebram** (como no terminal): o fluxo rola na horizontal quando a
+mensagem é mais larga que o painel. A rolagem é desenhada à mão, com as barras finas
+ciano do tema, no lugar das barras claras do Windows.
 
 ### Filtrar por sessão
 
@@ -96,6 +125,7 @@ janela para a área de notificação e o cmdwatch **continua monitorando em segu
 (ícone na bandeja: clique para restaurar, botão direito para sair).
 
 Atalhos: `ESPAÇO` pausa · `F5` limpa o fluxo · `ESC` limpa o foco / sai.
+No fluxo, a roda do mouse rola na vertical e `SHIFT`+roda na horizontal.
 
 ### Idioma da interface (PT-BR / EN)
 
@@ -134,6 +164,8 @@ painel ter o que mostrar.
 > Os títulos das seções usam **Bahnschrift SemiCondensed** (a DIN técnica do Windows) em
 > maiúscula com espaçamento aberto, gradiente vertical e halo neon — com **Agency FB**,
 > Consolas e a matriz de pixels 5×7 como fallbacks.
+> O fluxo de comandos também é desenhado à mão (`NeonFlow`), com rolagem própria — sem
+> `RichTextBox` e sem as barras de rolagem do sistema, que ficariam claras no tema escuro.
 
 ---
 
@@ -362,12 +394,13 @@ cmdwatch/
 │   ├── Core.cs          parser de .cmd, dicionário de explicações, JSON
 │   ├── Monitor.cs       engines de captura, atribuição, sessões, árvore de chamadas
 │   ├── NativeProcess.cs Toolhelp + leitura de PEB
+│   ├── HumanFormat.cs   formato das mensagens (CLI e painel usam o mesmo)
+│   ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
 │   ├── Program.cs       CLI, saída humana, modos analyze e trace
 │   └── gui/             painel WinForms (dashboard ao vivo)
 │       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
 │       ├── TechTitle.cs     renderizador dos títulos (tracking, gradiente, halo neon)
-│       ├── Widgets.cs       painéis, tabela de sessões, gráfico e o seletor de idioma
-│       ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
+│       ├── Widgets.cs       painéis, tabela de sessões, gráfico, fluxo e seletor de idioma
 │       ├── AppIcon.cs       carrega o ícone embutido (janela e bandeja)
 │       ├── DashboardForm.cs layout, estado e consumo dos eventos
 │       └── GuiRunner.cs     entrada da GUI e modo escuro da barra de título

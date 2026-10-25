@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
-namespace CmdWatch.Gui
+namespace CmdWatch
 {
     internal enum Idioma { PtBr = 0, En = 1 }
 
     /// <summary>
-    /// Idiomas da interface. O dicionario guarda pt-BR e en lado a lado; a
-    /// escolha fica salva em %APPDATA%\cmdwatch\ui.cfg.
+    /// Idiomas do produto. O dicionario guarda pt-BR e en lado a lado e e usado
+    /// tanto pela saida do CLI quanto pela interface do painel, para que os dois
+    /// falem com as mesmas palavras. A escolha da interface fica salva em
+    /// %APPDATA%\cmdwatch\ui.cfg.
     ///
     /// Observacao: o texto das explicacoes de comando (dicionario em Core.cs)
     /// e a descricao de origem do chamador permanecem em portugues - vem do
@@ -19,6 +21,7 @@ namespace CmdWatch.Gui
     {
         private static readonly Dictionary<string, string[]> Textos = new Dictionary<string, string[]>
         {
+            // -------------------------------------------- painel (chrome)
             { "windowTitle",   new[] { "cmdwatch - execucao de scripts .cmd/.bat", "cmdwatch - .cmd/.bat script execution" } },
             { "sessions",      new[] { "SESSOES .CMD",      "SESSIONS .CMD" } },
             { "flow",          new[] { "FLUXO DE COMANDOS", "COMMAND FLOW" } },
@@ -40,16 +43,6 @@ namespace CmdWatch.Gui
             { "cmdPerSec",     new[] { "COMANDOS/S", "CMDS/S" } },
             { "sessPerSec",    new[] { "SESSOES/S",  "SESS/S" } },
 
-            { "kindSessao",    new[] { "SESSAO",  "SESSION" } },
-            { "kindComando",   new[] { "COMANDO", "COMMAND" } },
-            { "kindChamada",   new[] { "CHAMADA", "CALL" } },
-            { "kindFim",       new[] { "FIM",     "END" } },
-            { "kindEvento",    new[] { "EVENTO",  "EVENT" } },
-
-            { "noDescription", new[] { "sem descricao",            "no description" } },
-            { "noCmdLine",     new[] { "(sem linha de comando)",    "(no command line)" } },
-            { "closed",        new[] { "{0}s  -  {1} comando(s)",   "{0}s  -  {1} command(s)" } },
-
             { "langLabel",     new[] { "IDIOMA",                   "LANGUAGE" } },
             { "switchLang",    new[] { "Trocar o idioma da interface", "Switch the interface language" } },
             { "trayTitle",     new[] { "cmdwatch - monitor de execucao", "cmdwatch - execution monitor" } },
@@ -69,14 +62,39 @@ namespace CmdWatch.Gui
                                         "Monitoring in the background. Click the tray icon to restore the panel." } },
             { "trayNoLog",     new[] { "Nenhum arquivo de log gerado ainda.", "No log file generated yet." } },
 
-            { "startup",       new[] { "=== cmdwatch {0} - motor {1}{2} - filtro: {3} - log: {4} ===",
-                                        "=== cmdwatch {0} - engine {1}{2} - filter: {3} - log: {4} ===" } },
-            { "monitoring",    new[] { "monitorando execucao de scripts .cmd/.bat ...",
-                                        "monitoring .cmd/.bat script execution ..." } },
-            { "motorPolling",  new[] { "polling", "polling" } },
-            { "motorWmi",      new[] { " (eventos WMI)", " (WMI events)" } },
-            { "filterNone",    new[] { "(todos)", "(all)" } },
-            { "logOff",        new[] { "(desativado)", "(disabled)" } }
+            // -------------------------------------------- formato das mensagens
+            // (identico ao da saida do CLI - ver HumanFormat.cs)
+            { "openTitle",     new[] { "SESSÃO .CMD ABERTA",  "SESSION .CMD OPENED" } },
+            { "closeTitle",    new[] { "SESSÃO ENCERRADA",   "SESSION ENDED" } },
+            { "fScript",       new[] { "script",   "script" } },
+            { "fOrigin",       new[] { "origem",   "origin" } },
+            { "fCaller",       new[] { "chamador", "caller" } },
+            { "fChain",        new[] { "cadeia",   "chain" } },
+            { "fSummary",      new[] { "resumo",   "summary" } },
+            { "fSteps",        new[] { "passos",   "steps" } },
+            { "fIn",           new[] { "em",       "in" } },
+            { "fLine",         new[] { "linha {0} do script",  "line {0} of the script" } },
+            { "fCommand",      new[] { "comando",  "command" } },
+            { "fLevel",        new[] { "nivel {0}",          "level {0}" } },
+            { "fCalledAt",     new[] { "(chamado na linha {0} de {1})", "(called at line {0} of {1})" } },
+            { "fExecuted",     new[] { "{0}s, {1} comandos executados",  "{0}s, {1} commands executed" } },
+            { "fLastLine",     new[] { "última linha mapeada: {0}",    "last mapped line: {0}" } },
+            { "fMappedSteps",  new[] { "{0} comandos mapeados no arquivo", "{0} commands mapped in the file" } },
+
+            // -------------------------------------------- cabecalho do log
+            { "bannerTitle",      new[] { "cmdwatch {0} — monitorando execucao de .cmd/.bat",
+                                          "cmdwatch {0} — monitoring .cmd/.bat execution" } },
+            { "bannerMotor",      new[] { "motor",      "engine" } },
+            { "bannerInterval",   new[] { "intervalo",  "interval" } },
+            { "bannerLog",        new[] { "log",        "log" } },
+            { "bannerFilter",     new[] { "filtro",     "filter" } },
+            { "bannerCaptureCli", new[] { "capturando ... (Ctrl+C para sair)", "capturing ... (Ctrl+C to exit)" } },
+            { "bannerCaptureGui", new[] { "capturando ... (ESC fecha o painel)", "capturing ... (ESC closes the panel)" } },
+            { "engineAdmin",      new[] { "(privilegiado)",   "(privileged)" } },
+            { "engineNoAdmin",    new[] { "(sem admin)",       "(no admin)" } },
+            { "engineInstant",    new[] { "evento instantaneo", "instant event" } },
+            { "filterNone",       new[] { "(todos)",           "(all)" } },
+            { "logOff",           new[] { "(desativado)",      "(disabled)" } }
         };
 
         public static Idioma Atual { get; private set; }
