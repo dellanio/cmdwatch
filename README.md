@@ -37,14 +37,14 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.0 — cmdwatch.exe (102 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.1 — cmdwatch.exe (102 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.0 |
-| Tamanho | 102 KB (104.448 bytes) |
-| SHA-256 | `f54e67531826955ba833e338b3de2556f76fb561bc4c724d0690d39962ff5bed` |
-| Página da release | [v1.0.0](https://github.com/dellanio/cmdwatch/releases/tag/v1.0.0) |
+| Versão | 1.0.1 |
+| Tamanho | 102 KB (103.936 bytes) |
+| SHA-256 | `34aca2572752b7f87df5a37aa060b122ef70dc8510b26baa7723247a1102c028` |
+| Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
 
@@ -64,24 +64,47 @@ O mesmo motor, agora com uma interface ao vivo para acompanhar a execução dos 
 
 ![Painel do cmdwatch](docs/dashboard.png)
 
+**Dá para abrir com duplo clique no `cmdwatch.exe`** (sem argumento nenhum) ou por terminal:
+
 ```powershell
-cmdwatch.exe gui
+cmdwatch.exe            # duplo clique no .exe faz o mesmo
+cmdwatch.exe gui        # idêntico, só explícito
 ```
 
 O painel é **WinForms nativo dentro do mesmo executável** — sem runtime extra, sem navegador,
 sem Electron. Aceita as mesmas opções do `monitor` (`--filter`, `--interval`, `--engine`,
 `--log`, `--quiet`).
 
-| Painel | O que mostra |
-|---|---|
-| **CMDWATCH** (medidores) | sessões ativas, comandos observados, chamadas encadeadas e eventos/segundo |
-| **ATIVIDADE .CMD** | comandos/s (verde) e sessões abertas/s (vermelho) nos últimos 60 s |
-| **SESSÕES .CMD** | cada `.cmd` vivo: PID, script, quem chamou, comandos, última linha e tempo de vida |
-| **FLUXO DE COMANDOS** | o stream de eventos, com a explicação de cada comando em português |
-| **LINHA DO TEMPO** | total acumulado de comandos observados |
-| **Motor / Log / Filtro / Sessões** | estado do motor de captura, arquivo de log, filtro e totais |
+### As três áreas
 
-Atalhos: `ESPAÇO` pausa, `F5` limpa o fluxo, `ESC` fecha.
+| Área | O que mostra |
+|---|---|
+| **SESSÕES .CMD** | Uma linha por script `.cmd` executado: PID, script, quem chamou, comandos observados, última linha mapeada, **data/hora de início** e **data/hora de término** (`em curso` enquanto roda) |
+| **FLUXO DE COMANDOS** | Todos os comandos observados, com a explicação em português. Por padrão mostra **todas as sessões**, igual ao `monitor` do CLI |
+| **ATIVIDADE .CMD** | Comandos/s (verde) e sessões abertas/s (vermelho) nos últimos 60 s |
+
+### Filtrar por sessão
+
+**Clique numa sessão** na área *SESSÕES .CMD* e o *FLUXO DE COMANDOS* passa a mostrar só
+aquela sessão (a linha ganha a marca `FOCO`). **Clique de novo** para desmarcar e voltar a
+ver todas. `ESC` também limpa o foco.
+
+### Minimizar para a bandeja
+
+O checkbox **“Enviar ao relógio do Windows e continuar monitorando”** no rodapé manda a
+janela para a área de notificação e o cmdwatch **continua monitorando em segundo plano**
+(ícone na bandeja: clique para restaurar, botão direito para sair).
+
+Atalhos: `ESPAÇO` pausa · `F5` limpa o fluxo · `ESC` limpa o foco / sai.
+
+### Ver o painel em ação
+
+```powershell
+demo\gui-demo.cmd
+```
+
+O script dispara uma sequência de comandos (incluindo um `call` de outro `.cmd`) para o
+painel ter o que mostrar.
 
 > A interface é desenhada à mão em GDI+ (painéis arredondados, gráficos com halo neon e
 > títulos em fonte de matriz 5×7), sem nenhum controle de terceiros.
@@ -195,6 +218,7 @@ cmdwatch.exe gui
 ```
 
 Painel ao vivo do fluxo de execução de scripts — veja [Painel gráfico](#painel-gráfico-windows).
+Sem argumento nenhum (`cmdwatch.exe`), ou por duplo clique no arquivo, o painel é o que abre.
 
 ### Explicar um script (sem executar)
 

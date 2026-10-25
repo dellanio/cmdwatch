@@ -19,7 +19,9 @@ namespace CmdWatch
         private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
-            if (args.Length == 0) { PrintUsage(); return 1; }
+
+            // sem argumentos (duplo clique no .exe): abre o painel grafico
+            if (args.Length == 0) { return RunGui(new Options()); }
 
             string cmd = args[0].ToLowerInvariant();
             var opts = Options.Parse(args.Skip(1).ToArray());
@@ -58,6 +60,7 @@ namespace CmdWatch
             Console.WriteLine(@"cmdwatch " + Version + @" — monitor de execucao de scripts .cmd/.bat
 
 uso:
+  cmdwatch.exe                     abre o painel grafico (duplo clique tambem funciona)
   cmdwatch monitor [opcoes]        monitora o sistema e reporta cada .cmd aberto
   cmdwatch gui [opcoes]            painel grafico do fluxo de execucao de .cmd/.bat
   cmdwatch analyze <arquivo.cmd>    explica o que um script faz (analise estatica)
