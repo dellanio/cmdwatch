@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.1 — cmdwatch.exe (102 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.2 — cmdwatch.exe (105 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.1 |
-| Tamanho | 102 KB (103.936 bytes) |
-| SHA-256 | `34aca2572752b7f87df5a37aa060b122ef70dc8510b26baa7723247a1102c028` |
+| Versão | 1.0.2 |
+| Tamanho | 105 KB (107.008 bytes) |
+| SHA-256 | `81801b12b74ffff580645a8facb6ce0db1b2f74b25ee1f6a46c48e0fba178055` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -106,8 +106,11 @@ demo\gui-demo.cmd
 O script dispara uma sequência de comandos (incluindo um `call` de outro `.cmd`) para o
 painel ter o que mostrar.
 
-> A interface é desenhada à mão em GDI+ (painéis arredondados, gráficos com halo neon e
-> títulos em fonte de matriz 5×7), sem nenhum controle de terceiros.
+> A interface é desenhada à mão em GDI+ (painéis arredondados com gradiente, gráficos com
+> halo neon, fundo em cinza escuro e marcações de escala), sem nenhum controle de terceiros.
+> Os títulos das seções usam **Bahnschrift SemiCondensed** (a DIN técnica do Windows) em
+> maiúscula com espaçamento aberto, gradiente vertical e halo neon — com **Agency FB**,
+> Consolas e a matriz de pixels 5×7 como fallbacks.
 
 ---
 

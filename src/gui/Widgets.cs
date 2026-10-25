@@ -65,20 +65,27 @@ namespace CmdWatch.Gui
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
             Theme.DrawPanel(g, r, 8, Theme.Panel, Theme.Border);
 
+            Rectangle head = new Rectangle(12, 2, Math.Max(10, Width - 24), HeaderHeight - 4);
             if (Title.Length > 0)
-                PixelFont.Draw(g, Title, 12, 8, TitleScale, Accent, true);
+                TechTitle.Draw(g, Title, head, Accent);
 
             if (TitleValue.Length > 0)
             {
-                int vw = PixelFont.MeasureWidth(TitleValue, TitleScale);
-                int tw = PixelFont.MeasureWidth(Title, TitleScale);
-                int x = Width - 12 - vw;
-                if (x > 12 + tw + 12)
-                    PixelFont.Draw(g, TitleValue, x, 8, TitleScale, Accent, true);
+                float tw = TechTitle.MeasureWidth(g, Title, Theme.TitleFont);
+                float vw = TechTitle.MeasureWidth(g, TitleValue, Theme.TitleFont);
+                if (12 + tw + 18 + vw < Width - 12)
+                    TechTitle.Draw(g, TitleValue, head, Accent, true);
             }
 
             using (Pen p = new Pen(Theme.Grid))
                 g.DrawLine(p, 10, HeaderHeight, Math.Max(10, Width - 11), HeaderHeight);
+
+            // marcacoes de escala sob a linha do cabecalho (detalhe de instrumento)
+            using (Pen tick = new Pen(Color.FromArgb(70, Accent)))
+            {
+                for (int x = 14; x < Width - 12; x += 14)
+                    g.DrawLine(tick, x, HeaderHeight - 3, x, HeaderHeight);
+            }
         }
     }
 

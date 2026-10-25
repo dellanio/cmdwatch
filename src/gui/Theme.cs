@@ -12,28 +12,77 @@ namespace CmdWatch.Gui
     /// </summary>
     internal static class Theme
     {
-        public static readonly Color Bg = Color.FromArgb(0x0B, 0x0E, 0x0B);
-        public static readonly Color Panel = Color.FromArgb(0x14, 0x18, 0x14);
-        public static readonly Color PanelDeep = Color.FromArgb(0x0F, 0x12, 0x0F);
-        public static readonly Color Border = Color.FromArgb(0x2A, 0x31, 0x2A);
-        public static readonly Color Grid = Color.FromArgb(0x1E, 0x24, 0x1E);
-        public static readonly Color Text = Color.FromArgb(0xC6, 0xCF, 0xC6);
-        public static readonly Color Dim = Color.FromArgb(0x76, 0x80, 0x76);
+        // fundo e superficies em cinza escuro (em vez de preto esverdeado)
+        public static readonly Color Bg = Color.FromArgb(0x1B, 0x1B, 0x1E);
+        public static readonly Color Panel = Color.FromArgb(0x25, 0x25, 0x29);
+        public static readonly Color PanelDeep = Color.FromArgb(0x1E, 0x1E, 0x22);
+        public static readonly Color Border = Color.FromArgb(0x3B, 0x3B, 0x41);
+        public static readonly Color Grid = Color.FromArgb(0x30, 0x30, 0x36);
+        public static readonly Color Text = Color.FromArgb(0xD8, 0xD8, 0xDC);
+        public static readonly Color Dim = Color.FromArgb(0x8E, 0x8E, 0x96);
 
-        public static readonly Color Cyan = Color.FromArgb(0x2F, 0xDF, 0xE4);
-        public static readonly Color Green = Color.FromArgb(0x2A, 0xC6, 0x63);
-        public static readonly Color Red = Color.FromArgb(0xFF, 0x3D, 0x3D);
-        public static readonly Color Amber = Color.FromArgb(0xF0, 0xA8, 0x3C);
-        public static readonly Color Blue = Color.FromArgb(0x3D, 0x9B, 0xE8);
-        public static readonly Color Purple = Color.FromArgb(0xA3, 0x5B, 0xF0);
-        public static readonly Color Magenta = Color.FromArgb(0xDD, 0x45, 0xC6);
-        public static readonly Color Yellow = Color.FromArgb(0xE6, 0xD2, 0x4C);
+        public static readonly Color Cyan = Color.FromArgb(0x3C, 0xE4, 0xEC);
+        public static readonly Color Green = Color.FromArgb(0x3A, 0xD4, 0x6E);
+        public static readonly Color Red = Color.FromArgb(0xFF, 0x4A, 0x4A);
+        public static readonly Color Amber = Color.FromArgb(0xF7, 0xB0, 0x42);
+        public static readonly Color Blue = Color.FromArgb(0x4A, 0xA8, 0xF2);
+        public static readonly Color Purple = Color.FromArgb(0xB0, 0x66, 0xF7);
+        public static readonly Color Magenta = Color.FromArgb(0xEA, 0x52, 0xD2);
+        public static readonly Color Yellow = Color.FromArgb(0xF0, 0xDD, 0x58);
 
         public static readonly Font Ui = new Font("Segoe UI", 8.75f, FontStyle.Regular, GraphicsUnit.Point);
         public static readonly Font UiBold = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
         public static readonly Font UiTitle = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
         public static readonly Font Mono = new Font("Consolas", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
         public static readonly Font MonoSmall = new Font("Consolas", 8f, FontStyle.Regular, GraphicsUnit.Point);
+
+        private static Font _titleFont;
+        private static bool _titleFontResolved;
+
+        /// <summary>
+        /// Fonte dos titulos das secoes. Ordem de preferencia: Bahnschrift
+        /// (DIN tecnica, vem no Windows 10 1809+), Agency FB, Bahnschrift,
+        /// Consolas e, por ultimo, a matriz de pixels 5x7.
+        /// </summary>
+        public static Font TitleFont
+        {
+            get
+            {
+                if (_titleFontResolved) return _titleFont;
+                _titleFontResolved = true;
+
+                string[,] candidates =
+                {
+                    { "Bahnschrift SemiCondensed", "Regular" },
+                    { "Bahnschrift", "Regular" },
+                    { "Agency FB", "Bold" },
+                    { "Consolas", "Bold" },
+                    { "Lucida Console", "Bold" }
+                };
+
+                for (int i = 0; i < candidates.GetLength(0); i++)
+                {
+                    try
+                    {
+                        FontStyle style = (FontStyle)Enum.Parse(typeof(FontStyle), candidates[i, 1]);
+                        Font f = new Font(candidates[i, 0], 12f, style, GraphicsUnit.Point);
+                        // o construtor de Font cai silenciosamente em outra fonte:
+                        // so aceita quando o nome devolvido e o mesmo pedido
+                        if (string.Equals(f.Name, candidates[i, 0], StringComparison.OrdinalIgnoreCase))
+                        {
+                            _titleFont = f;
+                            return _titleFont;
+                        }
+                        f.Dispose();
+                    }
+                    catch { }
+                }
+
+                try { _titleFont = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point); }
+                catch { _titleFont = null; }
+                return _titleFont;
+            }
+        }
 
         public static GraphicsPath RoundRect(Rectangle r, int radius)
         {
@@ -54,9 +103,30 @@ namespace CmdWatch.Gui
         {
             using (GraphicsPath path = RoundRect(r, radius))
             {
-                using (SolidBrush b = new SolidBrush(fill)) g.FillPath(b, path);
+                // leve gradiente vertical: da sensacao de painel, nao de retangulo chapado
+                using (LinearGradientBrush b = new LinearGradientBrush(
+                        r, Lighten(fill, 0.07f), Darken(fill, 0.12f), LinearGradientMode.Vertical))
+                {
+                    g.FillPath(b, path);
+                }
                 using (Pen p = new Pen(border)) g.DrawPath(p, path);
             }
+        }
+
+        public static Color Lighten(Color c, float t)
+        {
+            return Color.FromArgb(c.A,
+                (int)Math.Min(255, c.R + (255 - c.R) * t),
+                (int)Math.Min(255, c.G + (255 - c.G) * t),
+                (int)Math.Min(255, c.B + (255 - c.B) * t));
+        }
+
+        public static Color Darken(Color c, float t)
+        {
+            return Color.FromArgb(c.A,
+                (int)Math.Max(0, c.R - (255 - c.R) * t),
+                (int)Math.Max(0, c.G - (255 - c.G) * t),
+                (int)Math.Max(0, c.B - (255 - c.B) * t));
         }
 
         public static Color Mix(Color a, Color b, double t)
