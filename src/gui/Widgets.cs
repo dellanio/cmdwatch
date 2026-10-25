@@ -278,9 +278,10 @@ namespace CmdWatch.Gui
         private int _charW;
         private int _maxChars;
         private bool _dragV, _dragH;
+        private bool _hot;
         private int _dragOffset;
 
-        private const int BarW = 4;
+        private const int BarW = 6;
         private const int PadX = 10;
 
         public NeonFlow()
@@ -384,31 +385,33 @@ namespace CmdWatch.Gui
             }
             g.ResetClip();
 
-            // barra vertical fina
+            // barra vertical: polegar arredondado, no estilo do Windows
             if (_lines.Count > VisibleLines)
             {
                 Rectangle track = new Rectangle(Width - BarW, 0, BarW, textH);
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(35, Theme.Cyan)))
-                    g.FillRectangle(b, track);
-                int thumb = Math.Max(24, track.Height * VisibleLines / Math.Max(1, _lines.Count));
+                int thumb = Math.Max(28, track.Height * VisibleLines / Math.Max(1, _lines.Count));
                 int max = MaxScrollY;
                 int y = max == 0 ? 0 : (int)((double)_scrollY / max * (track.Height - thumb));
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Theme.Cyan)))
-                    g.FillRectangle(b, new Rectangle(track.X, y, BarW, thumb));
+                Theme.DrawScrollThumb(g, new Rectangle(track.X + 1, y, BarW - 2, thumb), ThumbColor());
             }
 
-            // barra horizontal fina
+            // barra horizontal: idem
             if (hasH)
             {
                 Rectangle track = new Rectangle(0, Height - BarW, textW, BarW);
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(35, Theme.Cyan)))
-                    g.FillRectangle(b, track);
-                int thumb = Math.Max(24, track.Width * (Width - BarW) / Math.Max(1, _maxChars * _charW + PadX));
+                int thumb = Math.Max(28, track.Width * (Width - BarW) / Math.Max(1, _maxChars * _charW + PadX));
                 int max = MaxScrollX;
                 int x = max == 0 ? 0 : (int)((double)_scrollX / max * (track.Width - thumb));
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Theme.Cyan)))
-                    g.FillRectangle(b, new Rectangle(x, track.Y, thumb, BarW));
+                Theme.DrawScrollThumb(g, new Rectangle(x, track.Y + 1, thumb, BarW - 2), ThumbColor());
             }
+        }
+
+        /// <summary>Cor do polegar: normal, sobre o mouse ou arrastando.</summary>
+        private Color ThumbColor()
+        {
+            if (_dragV || _dragH) return ScrollTheme.ThumbActive;
+            if (_hot) return ScrollTheme.ThumbHot;
+            return ScrollTheme.Thumb;
         }
 
         private Rectangle VerticalTrack()
@@ -467,10 +470,13 @@ namespace CmdWatch.Gui
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            bool hot = VerticalTrack().Contains(e.Location) || HorizontalTrack().Contains(e.Location);
+            if (hot != _hot) { _hot = hot; Invalidate(); }
+
             if (_dragV)
             {
                 Rectangle v = VerticalTrack();
-                int thumb = Math.Max(24, v.Height * VisibleLines / Math.Max(1, _lines.Count));
+                int thumb = Math.Max(28, v.Height * VisibleLines / Math.Max(1, _lines.Count));
                 int usable = Math.Max(1, v.Height - thumb);
                 int rel = e.Y - v.Y - _dragOffset;
                 if (rel < 0) rel = 0;
@@ -484,7 +490,7 @@ namespace CmdWatch.Gui
             {
                 Rectangle h = HorizontalTrack();
                 int total = Math.Max(1, _maxChars * _charW + PadX);
-                int thumb = Math.Max(24, h.Width * (Width - BarW) / total);
+                int thumb = Math.Max(28, h.Width * (Width - BarW) / total);
                 int usable = Math.Max(1, h.Width - thumb);
                 int rel = e.X - h.X - _dragOffset;
                 if (rel < 0) rel = 0;
@@ -493,6 +499,12 @@ namespace CmdWatch.Gui
                 _scrollX = max == 0 ? 0 : (int)((double)rel / usable * max);
                 Invalidate();
             }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_hot) { _hot = false; Invalidate(); }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -722,10 +734,9 @@ namespace CmdWatch.Gui
             if (Rows.Count > visible)
             {
                 int trackH = visible * RowHeight;
-                int barH = Math.Max(24, trackH * visible / Rows.Count);
+                int barH = Math.Max(28, trackH * visible / Rows.Count);
                 int barY = HeaderH + (trackH - barH) * _scroll / Math.Max(1, Rows.Count - visible);
-                using (SolidBrush br = new SolidBrush(Color.FromArgb(90, Theme.Cyan)))
-                    g.FillRectangle(br, new Rectangle(Width - 4, barY, 3, barH));
+                Theme.DrawScrollThumb(g, new Rectangle(Width - 6, barY, 4, barH), ScrollTheme.Thumb);
             }
         }
 

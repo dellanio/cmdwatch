@@ -152,6 +152,17 @@ namespace CmdWatch.Gui
                 default: return Text;
             }
         }
+
+        /// <summary>Desenha o polegar de uma barra de rolagem (ponta arredondada).</summary>
+        public static void DrawScrollThumb(Graphics g, Rectangle r, Color fill)
+        {
+            if (r.Width <= 0 || r.Height <= 0) return;
+            int radius = r.Width / 2;
+            if (radius < 2) radius = 2;
+            using (GraphicsPath p = RoundRect(r, radius))
+            using (SolidBrush b = new SolidBrush(fill))
+                g.FillPath(b, p);
+        }
     }
 
     /// <summary>

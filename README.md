@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.4 — cmdwatch.exe (498 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.5 — cmdwatch.exe (499 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.4 |
-| Tamanho | 498 KB (509.952 bytes) |
-| SHA-256 | `F9EB4D5BB88520FDC6E17EDB27558246D63973D6155589A2ED425987ADDCA44C` |
+| Versão | 1.0.5 |
+| Tamanho | 499 KB (510.464 bytes) |
+| SHA-256 | `3AC7F573210E230701F44B8413972F8419140F5C02FFB011DD3A6B40F86A1532` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -109,8 +109,10 @@ O formato é gerado por um módulo só (`src/HumanFormat.cs`), usado tanto pelo 
 quanto pelo painel — os dois não podem divergir.
 
 As linhas **não quebram** (como no terminal): o fluxo rola na horizontal quando a
-mensagem é mais larga que o painel. A rolagem é desenhada à mão, com as barras finas
-ciano do tema, no lugar das barras claras do Windows.
+mensagem é mais larga que o painel. A rolagem é desenhada à mão, mas no **estilo do
+Windows**: polegar arredondado cinza sobre trilho invisível, nas cores do tema do
+sistema (claro ou escuro), em vez das barras claras do Windows — que destoariam do
+tema escuro do painel.
 
 ### Filtrar por sessão
 
@@ -399,6 +401,7 @@ cmdwatch/
 │   ├── Program.cs       CLI, saída humana, modos analyze e trace
 │   └── gui/             painel WinForms (dashboard ao vivo)
 │       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
+│       ├── ScrollTheme.cs   cores da barra de rolagem conforme o tema do Windows
 │       ├── TechTitle.cs     renderizador dos títulos (tracking, gradiente, halo neon)
 │       ├── Widgets.cs       painéis, tabela de sessões, gráfico, fluxo e seletor de idioma
 │       ├── AppIcon.cs       carrega o ícone embutido (janela e bandeja)
