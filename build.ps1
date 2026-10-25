@@ -56,7 +56,10 @@ if (Test-Path $icon) {
 Write-Host "compilador : $csc"
 Write-Host "fontes     : $($files.Count) arquivo(s)"
 
-& $csc /nologo /optimize+ /platform:anycpu /target:exe /out:"$exe" $refs $extra $files
+# /target:winexe = aplicacao Windows: dar duplo clique no .exe NAO abre um
+# console. Os modos de terminal (monitor/analyze/trace) anexam o console do
+# terminal que os chamou - ver src/ConsoleHost.cs.
+& $csc /nologo /optimize+ /platform:anycpu /target:winexe /out:"$exe" $refs $extra $files
 if ($LASTEXITCODE -ne 0) { Write-Host "FALHA na compilacao" -ForegroundColor Red; exit 1 }
 
 Write-Host "OK -> $exe" -ForegroundColor Green

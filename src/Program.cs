@@ -12,19 +12,24 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.0.5";
+        internal const string Version = "1.0.6";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
         private static int Main(string[] args)
         {
-            Console.OutputEncoding = Encoding.UTF8;
-
-            // sem argumentos (duplo clique no .exe): abre o painel grafico
+            // sem argumentos (duplo clique no .exe): abre o painel grafico,
+            // sem console nenhum na tela
             if (args.Length == 0) { return RunGui(new Options()); }
 
             string cmd = args[0].ToLowerInvariant();
             var opts = Options.Parse(args.Skip(1).ToArray());
+
+            // o painel e a unica saida sem console
+            if (cmd == "gui" || cmd == "dashboard") return RunGui(opts);
+
+            // modos de terminal: anexa ao console de quem chamou
+            ConsoleHost.Ensure();
 
             switch (cmd)
             {
@@ -36,9 +41,6 @@ namespace CmdWatch
                     return RunAnalyze(opts, args.Skip(1).ToArray());
                 case "trace":
                     return RunTrace(opts, args.Skip(1).ToArray());
-                case "gui":
-                case "dashboard":
-                    return RunGui(opts);
                 case "version":
                 case "--version":
                     Console.WriteLine("cmdwatch " + Version);

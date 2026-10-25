@@ -71,6 +71,15 @@ cmdwatch.exe            # duplo clique no .exe faz o mesmo
 cmdwatch.exe gui        # idêntico, só explícito
 ```
 
+O executável é uma **aplicação Windows** (`/target:winexe`): ao dar duplo clique, **não
+aparece nenhuma janela de console** — só o painel. Os modos de terminal (`monitor`,
+`analyze`, `trace`) se anexam ao console de quem os chamou, então a saída continua
+saindo exatamente onde você espera:
+
+```powershell
+cmdwatch.exe monitor    # a saída sai no terminal de onde você chamou
+```
+
 O painel é **WinForms nativo dentro do mesmo executável** — sem runtime extra, sem navegador,
 sem Electron. Aceita as mesmas opções do `monitor` (`--filter`, `--interval`, `--engine`,
 `--log`, `--quiet`).
@@ -194,6 +203,12 @@ fecha essa lacuna** — e ainda roda **sem precisar de administrador**.
 
 O `cmdwatch` é um executável único (.NET Framework 4.8, **zero dependências**),
 compilado a partir de C# em `src/`.
+
+É uma aplicação **Windows** (`winexe`) com **dois modos**: o painel gráfico roda sem
+console nenhum, e os comandos de terminal (`monitor`, `analyze`, `trace`) se anexam ao
+console do terminal que os chamou (`AttachConsole` + `AllocConsole`, em
+`src/ConsoleHost.cs`). Por isso o mesmo `.exe` serve para as duas coisas sem abrir
+janela extra.
 
 ### Motor de captura
 
@@ -398,6 +413,7 @@ cmdwatch/
 │   ├── NativeProcess.cs Toolhelp + leitura de PEB
 │   ├── HumanFormat.cs   formato das mensagens (CLI e painel usam o mesmo)
 │   ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
+│   ├── ConsoleHost.cs   console dos modos de terminal (winexe)
 │   ├── Program.cs       CLI, saída humana, modos analyze e trace
 │   └── gui/             painel WinForms (dashboard ao vivo)
 │       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
