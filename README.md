@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.5 — cmdwatch.exe (499 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.7 — cmdwatch.exe (501 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.5 |
-| Tamanho | 499 KB (510.464 bytes) |
-| SHA-256 | `3AC7F573210E230701F44B8413972F8419140F5C02FFB011DD3A6B40F86A1532` |
+| Versão | 1.0.7 |
+| Tamanho | 501 KB (513.536 bytes) |
+| SHA-256 | `AFFE2FAF957BDB1745C6E6777E79AEC8337ADD5F0CF597A05267AEB026315259` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -122,6 +122,37 @@ mensagem é mais larga que o painel. A rolagem é desenhada à mão, mas no **es
 Windows**: polegar arredondado cinza sobre trilho invisível, nas cores do tema do
 sistema (claro ou escuro), em vez das barras claras do Windows — que destoariam do
 tema escuro do painel.
+
+### Chamadas entre scripts (v1.0.7)
+
+Quando um script chama outro, o cmdwatch registra a **chamada** com o script chamado, o
+nível e a linha exata de onde ela saiu:
+
+```
+[19:54:34.496]   +-> t3-interno.cmd (nivel 2)  (chamado na linha 3 de t2-chama-call.cmd)
+[19:54:34.496]   | where.exe (PID 35476)
+             em: t3-interno.cmd (nivel 2)
+             linha 3 do script: where hostname
+             -> executa "where hostname"
+```
+
+São reconhecidas todas as formas de chamar um script:
+
+| Forma | Como aparece |
+|---|---|
+| `cmd /c script.cmd` | chamada de nível 1, na linha do chamador |
+| `cmd /c "script.cmd"` | idem (com aspas) |
+| `cmd /c call script.cmd` | idem |
+| `cmd /k script.cmd` | idem |
+| `start "" script.cmd` | idem |
+| `cmd /c "pasta com espacos\script.cmd"` | idem — caminho com espaços funciona |
+| `cmd /c script.cmd ARG1 ARG2` | idem, com os argumentos mapeados |
+| `call script.cmd` (mesmo processo) | chamada de nível+1, dentro do script que chamou |
+| `.bat` | idem |
+| duplo clique no Explorer / PowerShell | sessão própria |
+
+O título do painel *SESSÕES .CMD* mostra o total de chamadas junto com as sessões
+(`1 SESSOES · 4 CHAMADAS`).
 
 ### Filtrar por sessão
 
@@ -369,6 +400,10 @@ Tipos: `batch_open`, `batch_step`, `batch_close`.
 * **Comandos internos do `cmd.exe`** (`echo`, `cd`, `if`, `for`, `goto`) não geram processo
   filho, então não são observáveis pelo monitor passivo. Para ver a sequência completa de
   um script específico, use o modo `trace`.
+* **`call` dentro do mesmo processo**: o Windows não cria processo novo, então o cmdwatch
+  reconstrói essa chamada lendo o texto do script que chamou — se o script chamado estiver
+  atrás de uma variável que o cmdwatch não consegue resolver, a chamada aparece sem o
+  nível exato.
 * O `cmdwatch` **não bloqueia nem altera** nada: é somente leitura de estado do sistema.
 
 ---

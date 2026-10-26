@@ -115,9 +115,11 @@ namespace CmdWatch
 
             if (ev.Type == "batch_call")
             {
-                string parent = ev.Frame != null && ev.Frame.Parent != null ? ev.Frame.Parent.ScriptName : "?";
-                lines.Add(new HumanLine("[" + ts + "]   +-> " +
-                    (ev.Frame != null ? ev.Frame.ScriptName : "?") +
+                ScriptFrame fr = ev.Frame;
+                string parent = fr != null && fr.Parent != null ? fr.Parent.ScriptName : "?";
+                string nome = fr != null ? fr.ScriptName : "?";
+                string nivel = fr != null && fr.Depth > 0 ? "  (" + Lang.F("fLevel", fr.Depth) + ")" : "";
+                lines.Add(new HumanLine("[" + ts + "]   +-> " + nome + nivel +
                     (ev.Step != null ? "  " + Lang.F("fCalledAt", ev.Step.Line, parent) : ""), HumanRole.Call));
                 return lines;
             }

@@ -75,6 +75,24 @@ namespace CmdWatch
         public int Depth;
         public bool ChildrenBuilt;
         public readonly List<ScriptFrame> Children = new List<ScriptFrame>();
+
+        // --- diagnostico da chamada ---
+        /// <summary>True quando o quadro veio de um cmd.exe realmente observado.</summary>
+        public bool Observed;
+        /// <summary>
+        /// True quando o cmd.exe roda um script que ainda nao sabemos qual.
+        /// O proprio cmd.exe zera a linha de comando do filho quando vai executar
+        /// um .cmd: o nome do script so existe no texto do script que o chamou.
+        /// </summary>
+        public bool UnknownScript;
+        /// <summary>Scripts possiveis enquanto o script do processo nao e conhecido.</summary>
+        public List<ScriptFrame> Candidates;
+        /// <summary>True quando a chamada acontece no MESMO processo (linha 'call x.cmd').</summary>
+        public bool SameProcess;
+        /// <summary>Linha do script pai que chama este script.</summary>
+        public BatchStep CallStep;
+        /// <summary>True quando a linha de chamada ja foi registrada no fluxo.</summary>
+        public bool CallEmitted;
     }
 
     // ------------------------------------------------------- Engines
@@ -365,13 +383,14 @@ namespace CmdWatch
             string rest = StripFirstToken(cmdLine);
             if (rest.Length == 0) return null;
 
-            // encontra o switch /c ou /k
-            string tail = null;
-            var tokens = Tokenize(rest);
-            int idx = 0;
-            for (; idx < tokens.Count; idx++)
+            // varre os tokens guardando a posicao de cada um no texto original:
+            // sem isso o caminho se perde quando tem espacos ("com espaco\meu script.cmd")
+            List<Tok> tokens = TokenizeComPosicao(rest);
+            int ini = -1;
+
+            for (int idx = 0; idx < tokens.Count; idx++)
             {
-                string t = tokens[idx];
+                string t = tokens[idx].Text;
                 if (t.Length == 0) continue;
                 if (t.StartsWith("/"))
                 {
@@ -381,7 +400,7 @@ namespace CmdWatch
                         if (s == "c" || s == "k" || s == "r")
                         {
                             switchUsed = "/" + s;
-                            tail = RemainderAfterSwitch(rest, tokens, idx);
+                            ini = idx + 1;
                             break;
                         }
                         continue;
@@ -389,21 +408,30 @@ namespace CmdWatch
                     // switch com argumento (ex.: /d /s) ou caminho que comecou com /
                     if (t.Length > 2) continue;
                 }
-                // primeiro token nao-switch: pode ser o proprio comando
-                tail = RemainderAfterSwitch(rest, tokens, idx - 1);
+                // primeiro token nao-switch: o proprio comando
                 switchUsed = "(sem switch)";
+                ini = idx;
                 break;
             }
-            if (tail == null) return null;
+            if (ini < 0) return null;
 
-            tail = tail.Trim();
-            if (tail.Length == 0) return null;
+            // o comando: do primeiro token do comando ate o fim da linha
+            string cmd = rest.Substring(Math.Min(tokens[ini].Start, rest.Length)).Trim();
 
-            // convencao do cmd: aspas externas envelopam o comando inteiro
-            if (tail.Length >= 2 && tail[0] == '"' && tail[tail.Length - 1] == '"')
-                tail = tail.Substring(1, tail.Length - 2);
+            // regra do cmd para as aspas: com exatamente duas aspas e espacos entre
+            // elas, as aspas sao preservadas; caso contrario, o cmd tira o par externo
+            // (""c:\pasta com espaco\x.cmd"" -> "c:\pasta com espaco\x.cmd")
+            if (cmd.Length >= 2 && cmd[0] == '"' && cmd[cmd.Length - 1] == '"')
+            {
+                int aspas = 0;
+                for (int k = 0; k < cmd.Length; k++) if (cmd[k] == '"') aspas++;
+                int espaco = cmd.IndexOf(' ');
+                bool preserva = aspas == 2 && espaco > 0 && espaco < cmd.Length - 1;
+                if (!preserva) cmd = cmd.Substring(1, cmd.Length - 2).Trim();
+            }
 
-            var ct = Tokenize(tail);
+            // tokeniza o comando: as aspas internas protegem os espacos do caminho
+            var ct = Tokenize(cmd);
             if (ct.Count == 0) return null;
 
             // procura o primeiro token que seja um script .cmd/.bat
@@ -420,22 +448,50 @@ namespace CmdWatch
             return null;
         }
 
-        private static string RemainderAfterSwitch(string rest, List<string> tokens, int switchIdx)
+        /// <summary>Um token com a posicao em que comeca no texto original.</summary>
+        private struct Tok
         {
-            // reconstroi o resto a partir da posicao do switch
-            int pos = -1;
-            int consumed = 0;
-            for (int i = 0; i < tokens.Count; i++)
+            public string Text;
+            public int Start;
+            public int End;
+        }
+
+        /// <summary>Tokeniza guardando a posicao de cada token no texto original.</summary>
+        private static List<Tok> TokenizeComPosicao(string s)
+        {
+            var res = new List<Tok>();
+            if (string.IsNullOrEmpty(s)) return res;
+            int i = 0;
+            while (i < s.Length)
             {
-                consumed += tokens[i].Length;
-                if (i == switchIdx) { pos = consumed; break; }
+                while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+                if (i >= s.Length) break;
+                int start = i;
+                var sb = new StringBuilder();
+                if (s[i] == '"')
+                {
+                    i++;
+                    while (i < s.Length)
+                    {
+                        if (s[i] == '"')
+                        {
+                            if (i + 1 < s.Length && s[i + 1] == '"') { sb.Append('"'); i += 2; continue; }
+                            i++; break;
+                        }
+                        sb.Append(s[i]); i++;
+                    }
+                }
+                else
+                {
+                    while (i < s.Length && !char.IsWhiteSpace(s[i])) { sb.Append(s[i]); i++; }
+                }
+                Tok t = new Tok();
+                t.Text = sb.ToString();
+                t.Start = start;
+                t.End = i;
+                res.Add(t);
             }
-            if (pos < 0) return null;
-            // descarta o switch em si
-            string tmp = rest.Substring(Math.Min(pos, rest.Length)).TrimStart();
-            if (tmp.StartsWith("/")) tmp = tmp.Substring(1).TrimStart();
-            if (tmp.StartsWith("c") || tmp.StartsWith("k") || tmp.StartsWith("r")) tmp = tmp.Substring(1).TrimStart();
-            return tmp;
+            return res;
         }
 
         private static string StripFirstToken(string s)
@@ -590,13 +646,18 @@ namespace CmdWatch
                             Analysis = BatchParser.Parse(resolved),
                             Session = session,
                             Parent = parentFrame,
-                            Depth = isTop ? 0 : parentFrame.Depth + 1
+                            Depth = isTop ? 0 : parentFrame.Depth + 1,
+                            Observed = true
                         };
                         lock (_lock) { _frames[p.Pid] = frame; }
                         if (isTop) { session.CurrentFrame = frame; session.RootFrame = frame; }
 
                         if (!isTop)
                         {
+                            // o script chamado entra na arvore do pai: e assim que os
+                            // comandos executados dentro dele sao atribuidos a ele
+                            // (e nao ao script que o chamou)
+                            LinkChild(parentFrame, frame);
                             // script aninhado: um passo da sessao pai
                             EmitStep(session, p, parentFrame.Analysis, p.CmdLine, true, frame);
                         }
@@ -604,10 +665,18 @@ namespace CmdWatch
                     }
                 }
 
-                // cmd.exe sem script (prompt interativo ou comando solto)
+                // cmd.exe SEM script na linha de comando. Quando o pai e um .cmd, isso
+                // quer dizer que o cmd.exe foi criado para EXECUTAR um script: o proprio
+                // cmd zera a linha de comando do filho, e o unico lugar onde o nome do
+                // script aparece e o texto do script que o chamou. O quadro fica 'sem
+                // script' e e resolvido pelo conteudo dos comandos executados dentro dele.
                 ScriptFrame pf;
                 lock (_lock) { _frames.TryGetValue(p.ParentPid, out pf); }
-                if (pf != null) EmitStepInSession(pf.Session, p, p.CmdLine);
+                if (pf != null)
+                {
+                    if (!pf.UnknownScript) CreateUnknownFrame(p, pf);
+                    EmitStepInSession(pf.Session, p, p.CmdLine, pf);
+                }
                 return;
             }
 
@@ -615,7 +684,7 @@ namespace CmdWatch
             lock (_lock) { _frames.TryGetValue(p.ParentPid, out f); }
             if (f != null && TrackChildren)
             {
-                EmitStepInSession(f.Session, p, p.CmdLine);
+                EmitStepInSession(f.Session, p, p.CmdLine, f);
             }
         }
 
@@ -666,6 +735,13 @@ namespace CmdWatch
             s.StepCount++;
             if (step != null && step.Line > s.LastLine) s.LastLine = step.Line;
 
+            if (isNested && frame != null)
+            {
+                // a linha do script pai que fez a chamada
+                if (step != null) frame.CallStep = step;
+                EmitCall(s, frame);
+            }
+
             Emit(new WatchEvent
             {
                 Type = "batch_step",
@@ -679,32 +755,162 @@ namespace CmdWatch
             });
         }
 
+        /// <summary>Registra no fluxo a chamada de um script dentro de outro.</summary>
+        private void EmitCall(BatchSession s, ScriptFrame frame)
+        {
+            if (s == null || frame == null || frame.CallEmitted) return;
+            frame.CallEmitted = true;
+            Emit(new WatchEvent
+            {
+                Type = "batch_call",
+                Timestamp = DateTime.Now,
+                Session = s,
+                Frame = frame,
+                Step = frame.CallStep,
+                Message = "chamada de script"
+            });
+        }
+
+        /// <summary>
+        /// Liga o script chamado ao quadro do pai. E o que permite atribuir os comandos
+        /// executados dentro do script chamado ao script certo (e nao ao que o chamou).
+        /// </summary>
+        private void LinkChild(ScriptFrame parent, ScriptFrame child)
+        {
+            if (parent == null || child == null) return;
+            if (!HasChild(parent, child.ScriptPath)) parent.Children.Add(child);
+            EnsureCallTree(child, child.Depth);
+        }
+
+        private static bool HasChild(ScriptFrame parent, string path)
+        {
+            if (parent == null || path == null) return false;
+            foreach (ScriptFrame c in parent.Children)
+                if (c.ScriptPath.Equals(path, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Cria o quadro de um cmd.exe cujo script ainda nao se sabe qual.
+        /// Os candidatos sao os scripts que o script pai pode estar chamando
+        /// (as linhas de 'call', 'cmd /c' e 'start' do proprio pai).
+        /// </summary>
+        private void CreateUnknownFrame(ProcInfo p, ScriptFrame host)
+        {
+            EnsureCallTree(host, host.Depth);
+
+            var frame = new ScriptFrame
+            {
+                CmdPid = p.Pid,
+                ScriptPath = "",
+                ScriptName = "",
+                ScriptArgs = "",
+                Analysis = null,
+                Session = host.Session,
+                Parent = host,
+                Depth = host.Depth + 1,
+                Observed = true,
+                UnknownScript = true
+            };
+
+            var cands = new List<ScriptFrame>();
+            foreach (ScriptFrame c in host.Children)
+            {
+                if (c.Observed) continue;          // ja sabemos qual e
+                if (c.Analysis == null || !c.Analysis.Exists) continue;
+                cands.Add(c);
+            }
+            frame.Candidates = cands;
+
+            lock (_lock) { _frames[p.Pid] = frame; }
+        }
+
+        /// <summary>
+        /// Descobre qual script o cmd.exe esta executando: o comando observado
+        /// e casado com os scripts candidatos e o que melhor casar vence.
+        /// </summary>
+        private void ResolveUnknown(ScriptFrame unknown, string cmdLine)
+        {
+            if (unknown == null || !unknown.UnknownScript) return;
+            if (unknown.Candidates == null || unknown.Candidates.Count == 0) return;
+            if (string.IsNullOrEmpty(cmdLine)) return;
+
+            ScriptFrame melhorCandidato = null;
+            ScriptFrame melhorAlvo = null;
+            double melhorConf = 0;
+
+            foreach (ScriptFrame c in unknown.Candidates)
+            {
+                MatchResult r = FindBest(c, cmdLine);
+                if (r == null || r.Frame == null) continue;
+                if (r.Conf > melhorConf + 0.001)
+                {
+                    melhorConf = r.Conf;
+                    melhorCandidato = c;
+                    melhorAlvo = r.Frame;
+                }
+            }
+
+            if (melhorAlvo == null || melhorConf < 1.5) return;
+
+            unknown.ScriptPath = melhorAlvo.ScriptPath;
+            unknown.ScriptName = melhorAlvo.ScriptName;
+            unknown.Analysis = melhorAlvo.Analysis;
+            unknown.CallStep = melhorCandidato.CallStep;   // a linha do pai que chamou
+            unknown.Depth = melhorAlvo.Depth;              // o nivel real do script
+            unknown.Candidates = null;
+            unknown.UnknownScript = false;
+
+            // a chamada existe: o script pai chamou esse script
+            EmitCall(unknown.Session, unknown);
+        }
+
         /// <summary>
         /// Casa um comando observado com a linha do .cmd.
         /// Como o cmd.exe executa 'call x.cmd' no mesmo processo (nenhum processo novo aparece),
         /// a atribuicao e feita procurando o melhor casamento em toda a arvore de chamadas
         /// do script: o comando e compared com o script atual e com todos os scripts
         /// chamados por ele, e fica com o que melhor casar.
+        ///
+        /// 'host' e o quadro do processo que disparou o comando: quando ele existe, a
+        /// subarvore dele e a primeira a ser vasculhada (o comando nasceu ali).
         /// </summary>
-        private void EmitStepInSession(BatchSession s, ProcInfo child, string cmdLine)
+        private void EmitStepInSession(BatchSession s, ProcInfo child, string cmdLine, ScriptFrame host)
         {
             if (s == null) return;
 
             EnsureCallTree(s.RootFrame, 0);
 
-            ScriptFrame best = null;
-            BatchStep bestStep = null;
-            double bestConf = 0;
-            SearchFrames(s.RootFrame, cmdLine, s.CurrentFrame, ref best, ref bestStep, ref bestConf);
+            // o host pode ser um cmd.exe cujo script ainda nao identificamos:
+            // e este comando observado que revela qual script ele esta rodando
+            if (host != null && host.UnknownScript) ResolveUnknown(host, cmdLine);
 
-            if (best != null && bestConf >= 1.5)
+            // 1) o comando nasceu dentro do processo 'host': procura primeiro na
+            //    subarvore dele (o 'call' nao cria processo, so o texto do script
+            //    revela qual script foi chamado)
+            MatchResult m = host != null ? FindBest(host, cmdLine) : null;
+            if (m == null || m.Conf < 1.5) m = null;
+
+            // 2) sem casamento suficiente: procura em toda a arvore de chamadas
+            if (m == null)
+            {
+                m = FindBest(s.RootFrame, cmdLine);
+                if (m != null && m.Conf < 1.5) m = null;
+            }
+
+            ScriptFrame best = m != null ? m.Frame : null;
+            BatchStep bestStep = m != null ? m.Step : null;
+
+            if (best != null)
             {
                 s.CurrentFrame = best;
-                s.LastLine = Math.Max(s.LastLine, 0);
             }
 
             s.StepCount++;
             if (bestStep != null && bestStep.Line > s.LastLine) s.LastLine = bestStep.Line;
+
+            // o comando rodou dentro de um script chamado: a chamada e real
+            if (best != null && best.Depth > 0) EmitCall(s, best);
 
             Emit(new WatchEvent
             {
@@ -714,52 +920,118 @@ namespace CmdWatch
                 Process = child,
                 Step = bestStep,
                 Frame = best,
-                Confidence = bestConf,
+                Confidence = m != null ? m.Conf : 0,
                 Message = "comando em execução"
             });
         }
 
-        /// <summary>Monta a arvore de scripts chamados (call x.cmd) a partir de um quadro.</summary>
+        /// <summary>Resultado do casamento de um comando observado com um script.</summary>
+        private sealed class MatchResult
+        {
+            public ScriptFrame Frame;
+            public BatchStep Step;
+            public double Conf;
+            public double Score;
+        }
+
+        /// <summary>Procura o melhor casamento do comando na arvore a partir de 'root'.</summary>
+        private MatchResult FindBest(ScriptFrame root, string cmdLine)
+        {
+            MatchResult r = new MatchResult();
+            SearchFrames(root, cmdLine, r);
+            return r;
+        }
+
+        /// <summary>
+        /// Monta a arvore de scripts chamados a partir de um quadro.
+        /// Reconhece 'call x.cmd', 'cmd /c x.cmd', 'cmd /k x.cmd' e 'start x.cmd'.
+        /// </summary>
         private void EnsureCallTree(ScriptFrame frame, int depth)
         {
-            if (frame == null || depth > 5) return;
+            if (frame == null || depth > 6) return;
             if (frame.Analysis == null || !frame.Analysis.Exists) return;
-            if (frame.ChildrenBuilt) return;
-            frame.ChildrenBuilt = true;
 
-            foreach (BatchStep st in frame.Analysis.Steps)
+            if (!frame.ChildrenBuilt)
             {
-                if (!st.IsCall || st.CallTarget == null) continue;
-                string low = st.CallTarget.ToLowerInvariant();
-                if (!low.EndsWith(".cmd") && !low.EndsWith(".bat")) continue;
+                frame.ChildrenBuilt = true;
 
-                string resolved = ResolveRelativeTo(st.CallTarget, frame.ScriptPath);
-                if (resolved == null) continue;
-
-                bool already = false;
-                foreach (ScriptFrame c in frame.Children)
-                    if (c.ScriptPath.Equals(resolved, StringComparison.OrdinalIgnoreCase)) { already = true; break; }
-                if (already) continue;
-
-                var child = new ScriptFrame
+                foreach (BatchStep st in frame.Analysis.Steps)
                 {
-                    CmdPid = frame.CmdPid,
-                    ScriptPath = resolved,
-                    ScriptName = System.IO.Path.GetFileName(resolved),
-                    ScriptArgs = "",
-                    Analysis = BatchParser.Parse(resolved),
-                    Session = frame.Session,
-                    Parent = frame,
-                    Depth = frame.Depth + 1
-                };
-                frame.Children.Add(child);
-                EnsureCallTree(child, depth + 1);
+                    if (st.IsComment || st.IsLabel) continue;
+
+                    bool sameProcess;
+                    string target = CallTargetOf(st, out sameProcess);
+                    if (target == null) continue;
+
+                    string resolved = ResolveRelativeTo(target, frame.ScriptPath);
+                    if (resolved == null) continue;
+                    if (HasChild(frame, resolved)) continue;
+
+                    var child = new ScriptFrame
+                    {
+                        CmdPid = frame.CmdPid,
+                        ScriptPath = resolved,
+                        ScriptName = System.IO.Path.GetFileName(resolved),
+                        ScriptArgs = "",
+                        Analysis = BatchParser.Parse(resolved),
+                        Session = frame.Session,
+                        Parent = frame,
+                        Depth = frame.Depth + 1,
+                        SameProcess = sameProcess,
+                        CallStep = st
+                    };
+                    frame.Children.Add(child);
+                }
             }
+
+            // os filhos observados (processo real) tambem precisam da arvore deles
+            foreach (ScriptFrame c in frame.Children)
+                EnsureCallTree(c, depth + 1);
+        }
+
+        /// <summary>
+        /// Descobre o script chamado por uma linha do .cmd: 'call x.cmd', 'cmd /c x.cmd',
+        /// 'cmd /k x.cmd' ou 'start x.cmd'. Devolve null quando a linha nao chama script.
+        /// 'sameProcess' diz se a chamada roda no MESMO processo (linha 'call') ou em
+        /// um cmd.exe novo (linha 'cmd /c' ou 'start').
+        /// </summary>
+        private static string CallTargetOf(BatchStep st, out bool sameProcess)
+        {
+            sameProcess = false;
+            if (st == null) return null;
+            if (st.IsCall && st.CallTarget != null && st.CallTarget.Length > 0)
+            {
+                sameProcess = true;    // 'call' roda no mesmo cmd.exe
+                return st.CallTarget;
+            }
+
+            string cmd = (st.Command ?? "").Trim();
+            if (cmd.Length == 0) return null;
+
+            List<string> toks = BatchCmdLine.Tokenize(cmd);
+            if (toks.Count == 0) return null;
+
+            string exe = toks[0].Trim('"').ToLowerInvariant();
+            if (exe != "cmd" && exe != "start") return null;
+
+            for (int i = 1; i < toks.Count; i++)
+            {
+                string t = toks[i].Trim('"');
+                if (t.Length == 0) continue;
+                string low = t.ToLowerInvariant();
+                // comandos internos do cmd que nao sao chamadas de script
+                if (low == "echo" || low == "dir" || low == "type" || low == "copy" ||
+                    low == "move" || low == "del" || low == "ren" || low == "md" ||
+                    low == "rd" || low == "set" || low == "if" || low == "for" ||
+                    low == "goto" || low == "exit" || low == "cd" || low == "pushd" ||
+                    low == "popd") continue;
+                if (low.EndsWith(".cmd") || low.EndsWith(".bat")) return t;
+            }
+            return null;
         }
 
         /// <summary>Busca o melhor casamento na arvore de scripts chamados.</summary>
-        private void SearchFrames(ScriptFrame frame, string cmdLine, ScriptFrame preferred,
-                                  ref ScriptFrame best, ref BatchStep bestStep, ref double bestConf)
+        private void SearchFrames(ScriptFrame frame, string cmdLine, MatchResult res)
         {
             if (frame == null) return;
 
@@ -770,19 +1042,32 @@ namespace CmdWatch
                 if (st != null || conf > 0)
                 {
                     double score = conf;
-                    // desempate a favor do script atualmente em execucao
-                    if (preferred != null && frame == preferred) score += 0.4;
-                    if (score > bestConf)
+                    // um quadro observado (processo real) vale mais que um deduzido do texto
+                    if (frame.Observed) score += 0.3;
+
+                    bool melhor = res.Frame == null
+                        || score > res.Score + 0.001
+                        // empate: gana o script mais profundo - e ele que esta rodando
+                        || (score >= res.Score - 0.5 && frame.Depth > res.Frame.Depth);
+
+                    if (melhor)
                     {
-                        bestConf = score;
-                        best = frame;
-                        bestStep = conf >= 1.5 ? st : null;
+                        res.Frame = frame;
+                        res.Step = conf >= 1.5 ? st : null;
+                        res.Conf = conf;
+                        res.Score = score;
                     }
                 }
             }
 
             foreach (ScriptFrame c in frame.Children)
-                SearchFrames(c, cmdLine, preferred, ref best, ref bestStep, ref bestConf);
+            {
+                // so desce por chamadas que rodam no MESMO processo: um script
+                // chamado por 'cmd /c' tem o proprio cmd.exe, e seus comandos
+                // tem o quadro dele como host
+                if (!c.SameProcess) continue;
+                SearchFrames(c, cmdLine, res);
+            }
         }
 
         private string ResolveRelativeTo(string raw, string baseScriptPath)

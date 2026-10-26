@@ -27,6 +27,7 @@ namespace CmdWatch
             { "flow",          new[] { "FLUXO DE COMANDOS", "COMMAND FLOW" } },
             { "activity",      new[] { "ATIVIDADE .CMD",    "ACTIVITY .CMD" } },
             { "sessionsShort", new[] { "SESSOES",           "SESSIONS" } },
+            { "callsShort",    new[] { "CHAMADAS",          "CALLS" } },
             { "stepsShort",    new[] { "PASSOS",            "STEPS" } },
             { "all",           new[] { "TODAS",             "ALL" } },
 

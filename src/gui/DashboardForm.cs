@@ -375,7 +375,7 @@ namespace CmdWatch.Gui
             _activity.LabelB = Lang.T("sessPerSec");
             _lang.Caption = Lang.T("langLabel");
 
-            _pSessions.TitleValue = _totalSessions + " " + Lang.T("sessionsShort");
+            _pSessions.TitleValue = SessionsTitle();
             _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
             _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
 
@@ -424,7 +424,12 @@ namespace CmdWatch.Gui
                     break;
                 case "batch_step":
                     _totalSteps++;
-                    if (ev.Frame != null && ev.Frame.Depth > 0) { _callAcc++; _totalCalls++; }
+                    TouchRow(ev);
+                    break;
+                case "batch_call":
+                    // a chamada de um script dentro de outro
+                    _callAcc++;
+                    _totalCalls++;
                     TouchRow(ev);
                     break;
                 case "batch_close":
@@ -520,6 +525,14 @@ namespace CmdWatch.Gui
             Invalidate();
         }
 
+        /// <summary>Titulo do painel de sessoes: sessoes + chamadas de script.</summary>
+        private string SessionsTitle()
+        {
+            string t = _totalSessions + " " + Lang.T("sessionsShort");
+            if (_totalCalls > 0) t += "  ·  " + _totalCalls + " " + Lang.T("callsShort");
+            return t;
+        }
+
         // -------------------------------------------------------- timers
         private void OnTick(object sender, EventArgs e)
         {
@@ -545,7 +558,7 @@ namespace CmdWatch.Gui
                 _sessions.Rows = _rows.OrderByDescending(r => r.StartedAt).ToList();
                 _sessions.Invalidate();
 
-                _pSessions.TitleValue = _totalSessions + " " + Lang.T("sessionsShort");
+                _pSessions.TitleValue = SessionsTitle();
                 _pSessions.Invalidate();
                 _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
                 _pActivity.Invalidate();

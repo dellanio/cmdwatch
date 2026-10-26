@@ -128,6 +128,8 @@ namespace CmdWatch
                 if (!ReadProcessMemory(h, procParams, buf, region, out read)) return false;
                 int usable = (int)read.ToInt64();
 
+                bool achouComArgumentos = false;
+
                 for (int i = 0; i + 16 <= usable; i += 2)
                 {
                     ushort len = BitConverter.ToUInt16(buf, i);
@@ -143,15 +145,24 @@ namespace CmdWatch
                     if (s.Length == 0) continue;
 
                     // argv[0] pode estar entre aspas: "C:\Windows\system32\cmd.exe" /c ...
+                    // e pode NAO ter a extensao: o cmd.exe lanca o programa com
+                    // argv[0] = "where" (sem o .exe). A comparacao ignora a extensao.
                     string first = FirstToken(s);
-                    string baseName = BatchFile.SafeBaseName(first.Trim('"'));
-                    if (exeName != null && exeName.Length > 0 &&
-                        baseName.Equals(exeName, StringComparison.OrdinalIgnoreCase))
+                    string baseName = SemExtensao(BatchFile.SafeBaseName(first.Trim('"')));
+                    string alvo = SemExtensao(exeName ?? "");
+                    if (alvo.Length > 0 &&
+                        baseName.Equals(alvo, StringComparison.OrdinalIgnoreCase))
                     {
                         if (s.Length > first.Length)
                         {
-                            // command line com argumentos: vence o mais longo
-                            if (s.Length > commandLine.Length) commandLine = s;
+                            // linha de comando COM argumentos: vale sempre mais que o
+                            // caminho do executavel, mesmo sendo mais curta
+                            // (ex.: 'where  cmd' vs 'C:\Windows\System32\where.exe')
+                            if (!achouComArgumentos || s.Length > commandLine.Length)
+                            {
+                                commandLine = s;
+                                achouComArgumentos = true;
+                            }
                         }
                         else
                         {
@@ -170,6 +181,16 @@ namespace CmdWatch
             }
             catch { return false; }
             finally { try { CloseHandle(h); } catch { } }
+        }
+
+        /// <summary>Nome do arquivo sem a extensao de executavel.</summary>
+        private static string SemExtensao(string nome)
+        {
+            if (string.IsNullOrEmpty(nome)) return "";
+            foreach (string ext in new[] { ".exe", ".com", ".bat", ".cmd" })
+                if (nome.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                    return nome.Substring(0, nome.Length - ext.Length);
+            return nome;
         }
 
         private static string FirstToken(string s)
