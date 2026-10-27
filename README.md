@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.8 — cmdwatch.exe (502 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.9 — cmdwatch.exe (512 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.8 |
-| Tamanho | 502 KB (514.048 bytes) |
-| SHA-256 | `E98CCAE5689533AFE2F9E438C4A9B556FADCF4409C20C33BF0066255A9C5A95F` |
+| Versão | 1.0.9 |
+| Tamanho | 512 KB (524.288 bytes) |
+| SHA-256 | `9FE8B093E7B003D385C13003460DB70716A811D1C7D0FD8834FA2AA18F369D49` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -159,6 +159,31 @@ O título do painel *SESSÕES .CMD* mostra o total de chamadas junto com as sess
 **Clique numa sessão** na área *SESSÕES .CMD* e o *FLUXO DE COMANDOS* passa a mostrar só
 aquela sessão (a linha ganha a marca `FOCO`). **Clique de novo** para desmarcar e voltar a
 ver todas. `ESC` também limpa o foco.
+
+### Encerrar um script (v1.0.9)
+
+**Botão direito numa sessão** da área *SESSÕES .CMD* abre o menu de contexto, com a opção
+**“Fechar”** para **encerrar o script em execução**:
+
+![Menu de contexto da sessão](docs/menu-contexto.png)
+
+O item mostra qual script é o alvo (`demo-longo.cmd  (PID 22212)`), e a escolha pede
+confirmação antes de encerrar qualquer coisa:
+
+![Confirmação do encerramento](docs/confirmacao.png)
+
+O que acontece ao confirmar:
+
+* o `cmd.exe` que hospeda o script é **encerrado** — junto com os **processos filhos** que
+  ele deixou rodando (o `ping.exe`, o `conhost.exe`…); sem isso, um script travado num
+  `ping -n 9999` continuaria com o filho vivo depois do `cmd.exe` morrer;
+* o cmdwatch **continua monitorando**: a sessão aparece com o horário de *FIM* preenchido e
+  o fluxo registra o `SESSÃO ENCERRADA`;
+* o rodapé confirma em verde: `Script encerrado: demo-longo.cmd`.
+
+Em sessão já encerrada o item *Fechar* fica esmaecido (e o `ESC` cancela sem encerrar
+nada). Encerrar um processo que roda como administrador exige rodar o cmdwatch como
+administrador — o painel avisa o motivo caso não consiga.
 
 ### Minimizar para a bandeja
 
@@ -456,17 +481,20 @@ cmdwatch/
 │   ├── HumanFormat.cs   formato das mensagens (CLI e painel usam o mesmo)
 │   ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
 │   ├── ConsoleHost.cs   console dos modos de terminal (winexe)
+│   ├── ProcessControl.cs encerramento de processos (e da árvore de filhos)
 │   ├── Program.cs       CLI, saída humana, modos analyze e trace
 │   └── gui/             painel WinForms (dashboard ao vivo)
 │       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
 │       ├── ScrollTheme.cs   cores da barra de rolagem conforme o tema do Windows
 │       ├── TechTitle.cs     renderizador dos títulos (tracking, gradiente, halo neon)
 │       ├── Widgets.cs       painéis, tabela de sessões, gráfico, fluxo e seletor de idioma
+│       ├── NeonMenu.cs      menu de contexto no tema (renderer do ToolStrip)
+│       ├── NeonDialog.cs    diálogo de confirmação no tema
 │       ├── AppIcon.cs       carrega o ícone embutido (janela e bandeja)
 │       ├── DashboardForm.cs layout, estado e consumo dos eventos
 │       └── GuiRunner.cs     entrada da GUI e modo escuro da barra de título
 ├── assets/              ícones do produto (gerados por tools\Generate-Icon.ps1)
-├── tools/               geração do ícone e captura de tela do painel
+├── tools/               geração do ícone, captura de tela e testes do painel
 ├── demo/                scripts de demonstração
 ├── docs/dashboard.png   captura do painel
 ├── build.ps1

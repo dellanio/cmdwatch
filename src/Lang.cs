@@ -56,6 +56,17 @@ namespace CmdWatch
                                         "FOCUS: {0} (pid {1}) - click the session again to show all of them" } },
             { "paused",        new[] { "PAUSADO", "PAUSED" } },
 
+            // -------------------------------------------- menu de contexto
+            { "menuClose",     new[] { "Fechar", "Close" } },
+            { "confirmCloseTitle", new[] { "Encerrar o script?", "Terminate the script?" } },
+            { "confirmCloseMsg",   new[] { "O script {0} (PID {1}) e os processos que ele deixou rodando serão encerrados.\nO cmdwatch continua monitorando.",
+                                           "The script {0} (PID {1}) and the processes it left running will be terminated.\ncmdwatch keeps monitoring." } },
+            { "confirmYes",    new[] { "Fechar",    "Terminate" } },
+            { "confirmNo",     new[] { "Cancelar",  "Cancel" } },
+            { "noticeClosed",  new[] { "Script encerrado: {0}", "Script terminated: {0}" } },
+            { "noticeCloseGone", new[] { "{0} já havia terminado", "{0} had already ended" } },
+            { "noticeCloseFail", new[] { "Não foi possível encerrar {0}: {1}", "Could not terminate {0}: {1}" } },
+
             { "trayRestore",   new[] { "Restaurar painel",     "Restore panel" } },
             { "trayOpenLog",   new[] { "Abrir arquivo de log", "Open log file" } },
             { "trayQuit",      new[] { "Sair do cmdwatch",     "Exit cmdwatch" } },

@@ -615,6 +615,12 @@ namespace CmdWatch.Gui
         public int SelectedPid;
         public event Action SelectionChanged;
 
+        /// <summary>
+        /// Botao direito sobre uma linha: (pid da sessao, ponto em coordenadas
+        /// de tela) para o painel abrir o menu de contexto.
+        /// </summary>
+        public event Action<int, Point> ContextRequested;
+
         private int _scroll;
 
         /// <summary>Cabecalhos das colunas (vêm do dicionario de idioma).</summary>
@@ -744,7 +750,18 @@ namespace CmdWatch.Gui
         {
             base.OnMouseDown(e);
             int idx = (e.Y - HeaderH) / RowHeight;
-            if (e.Y < HeaderH || idx < 0 || _scroll + idx >= Rows.Count)
+            bool onRow = e.Y >= HeaderH && idx >= 0 && _scroll + idx < Rows.Count;
+
+            // botao direito: menu de contexto da sessao (nao mexe no filtro)
+            if (e.Button == MouseButtons.Right)
+            {
+                if (onRow && ContextRequested != null)
+                    ContextRequested(Rows[_scroll + idx].Pid, PointToScreen(e.Location));
+                return;
+            }
+            if (e.Button != MouseButtons.Left) return;
+
+            if (!onRow)
             {
                 SetSelection(0);
                 return;

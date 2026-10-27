@@ -44,9 +44,15 @@ namespace CmdWatch.Gui
         private NeonToggle _lang;
         private NotifyIcon _tray;
         private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
+        private readonly ContextMenuStrip _ctxMenu = new ContextMenuStrip();
         private System.Windows.Forms.Timer _tick, _slow;
         private const int HintH = 34;
         private const int LangW = 150;
+
+        // aviso temporario no rodape (ex.: "script encerrado")
+        private string _notice = "";
+        private DateTime _noticeUntil = DateTime.MinValue;
+        private Color _noticeColor = Theme.Text;
 
         public DashboardForm(Options opts)
         {
@@ -86,6 +92,7 @@ namespace CmdWatch.Gui
 
             _sessions = new SessionTable();
             _sessions.SelectionChanged += OnSelectionChanged;
+            _sessions.ContextRequested += OnSessionContext;
             _pSessions.Controls.Add(_sessions);
 
             _stream = new NeonFlow();
@@ -105,6 +112,11 @@ namespace CmdWatch.Gui
             _lang = new NeonToggle { Caption = Lang.T("langLabel") };
             _lang.Index = (Lang.Atual == Idioma.En) ? 1 : 0;
             _lang.IndexChanged += OnLanguageIndexChanged;
+
+            // menu de contexto da sessao (botao direito na tabela de sessoes)
+            _ctxMenu.Renderer = new NeonMenuRenderer();
+            _ctxMenu.ShowImageMargin = false;
+            _ctxMenu.ShowCheckMargin = false;
 
             Controls.Add(_pSessions);
             Controls.Add(_pStream);
@@ -164,7 +176,12 @@ namespace CmdWatch.Gui
             DrawVersion(e.Graphics);
 
             string info;
-            if (_selectedPid != 0)
+            bool temAviso = _notice.Length > 0 && DateTime.Now < _noticeUntil;
+            if (temAviso)
+            {
+                info = _notice;
+            }
+            else if (_selectedPid != 0)
             {
                 string script = "";
                 foreach (SessionRow r in _rows)
@@ -182,7 +199,8 @@ namespace CmdWatch.Gui
                 Math.Max(200, ClientSize.Width - LangW - 24), HintH);
 
             TextRenderer.DrawText(e.Graphics, info, Theme.Ui, hint,
-                Theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                temAviso ? _noticeColor : Theme.Dim,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
 
         /// <summary>
@@ -279,6 +297,7 @@ namespace CmdWatch.Gui
             try { if (_engine != null) { _engine.Stop(); _engine.Dispose(); } } catch { }
             try { if (_log != null) { _log.Flush(); _log.Close(); _log = null; } } catch { }
             try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; } } catch { }
+            try { if (_ctxMenu != null) { _ctxMenu.Dispose(); } } catch { }
             base.OnFormClosing(e);
         }
 
@@ -425,6 +444,81 @@ namespace CmdWatch.Gui
             LayoutDashboard();
             RebuildStream();
             ApplyTrayTexts();
+
+            // o menu de contexto fica com o rotulo antigo: fecha
+            try { if (_ctxMenu.Visible) _ctxMenu.Close(); } catch { }
+
+            Invalidate();
+        }
+
+        // ------------------------------------------- menu de contexto
+        /// <summary>
+        /// Botao direito sobre uma sessao: monta o menu com a opcao "Fechar",
+        /// que encerra o script em execucao.
+        /// </summary>
+        private void OnSessionContext(int pid, Point screenPoint)
+        {
+            SessionRow r;
+            if (!_rowByPid.TryGetValue(pid, out r)) return;
+
+            _ctxMenu.Items.Clear();
+
+            // cabecalho: identifica o alvo do comando
+            ToolStripMenuItem head = new ToolStripMenuItem(r.Script + "   (PID " + r.Pid + ")");
+            head.Enabled = false;
+            _ctxMenu.Items.Add(head);
+            _ctxMenu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem fechar = new ToolStripMenuItem(Lang.T("menuClose"));
+            fechar.Enabled = !r.Closed;
+            fechar.Click += delegate
+            {
+                SessionRow alvo = r;
+                // adia para o menu terminar de fechar antes do dialogo modal
+                try { BeginInvoke(new Action(delegate { AskCloseSession(alvo); })); }
+                catch { AskCloseSession(alvo); }
+            };
+            _ctxMenu.Items.Add(fechar);
+
+            try { _ctxMenu.Show(screenPoint); } catch { }
+        }
+
+        /// <summary>
+        /// Confirma e encerra a sessao: mata o cmd.exe do script e os
+        /// processos filhos que ele deixou rodando.
+        /// </summary>
+        private void AskCloseSession(SessionRow r)
+        {
+            string msg = Lang.F("confirmCloseMsg", r.Script, r.Pid);
+            bool ok = NeonDialog.Confirm(this, Lang.T("confirmCloseTitle"), msg,
+                Lang.T("confirmYes"), Lang.T("confirmNo"), Theme.Red);
+            if (!ok) return;
+
+            TerminateResult res = ProcessControl.Terminate(r.Pid, true);
+            if (res.Ok)
+            {
+                // a sessao morre agora: o monitor ainda emitira o batch_close
+                r.Closed = true;
+                r.ClosedAt = DateTime.Now;
+                _sessions.Invalidate();
+                ShowNotice(Lang.F("noticeClosed", r.Script), Theme.Green, 6);
+            }
+            else if (res.AlreadyGone)
+            {
+                ShowNotice(Lang.F("noticeCloseGone", r.Script), Theme.Amber, 6);
+            }
+            else
+            {
+                ShowNotice(Lang.F("noticeCloseFail", r.Script, res.Error), Theme.Red, 10);
+            }
+        }
+
+        /// <summary>Mensagem temporaria no rodape do painel.</summary>
+        private void ShowNotice(string text, Color color, int seconds)
+        {
+            _notice = text ?? "";
+            _noticeColor = color;
+            _noticeUntil = DateTime.Now.AddSeconds(seconds);
             Invalidate();
         }
 
@@ -583,6 +677,13 @@ namespace CmdWatch.Gui
                 _activity.SeriesA = new List<double>(_eventsPerSec);
                 _activity.SeriesB = new List<double>(_opensPerSec);
                 _activity.Invalidate();
+
+                // aviso temporario: some sozinho
+                if (_notice.Length > 0 && DateTime.Now >= _noticeUntil)
+                {
+                    _notice = "";
+                    Invalidate();
+                }
             }
             catch { }
         }
