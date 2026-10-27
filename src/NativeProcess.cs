@@ -105,8 +105,21 @@ namespace CmdWatch
         /// </summary>
         public static bool TryGetProcessStrings(int pid, string exeName, out string commandLine, out string imagePath)
         {
+            string workingDir;
+            return TryGetProcessStrings(pid, exeName, out commandLine, out imagePath, out workingDir);
+        }
+
+        /// <summary>
+        /// Como acima, mas tambem devolve o diretorio de trabalho do processo
+        /// (CURDIR dentro do RTL_USER_PROCESS_PARAMETERS). O diretorio de trabalho
+        /// e o que permite resolver um script chamado por caminho RELATIVO:
+        /// "cmd /c build.cmd" e relativo ao diretorio do cmd.exe, nao ao do monitor.
+        /// </summary>
+        public static bool TryGetProcessStrings(int pid, string exeName, out string commandLine, out string imagePath, out string workingDir)
+        {
             commandLine = "";
             imagePath = "";
+            workingDir = "";
             IntPtr h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
             if (h == IntPtr.Zero)
                 h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid);
@@ -144,6 +157,16 @@ namespace CmdWatch
                     string s = ReadString(h, strPtr, len);
                     if (s.Length == 0) continue;
 
+                    // diretorio de trabalho (CURDIR): a UNICODE_STRING crua de uma
+                    // pasta que existe e termina em barra. Aparece antes do caminho
+                    // do executavel na regiao - e o texto NAO pode ser aparado (o
+                    // Trim() comeria a barra final).
+                    if (workingDir.Length == 0)
+                    {
+                        string cru = ReadStringRaw(h, strPtr, len);
+                        if (EhDiretorio(cru)) workingDir = cru;
+                    }
+
                     // argv[0] pode estar entre aspas: "C:\Windows\system32\cmd.exe" /c ...
                     // e pode NAO ter a extensao: o cmd.exe lanca o programa com
                     // argv[0] = "where" (sem o .exe). A comparacao ignora a extensao.
@@ -177,10 +200,28 @@ namespace CmdWatch
                         imagePath = s;
                     }
                 }
-                return commandLine.Length > 0 || imagePath.Length > 0;
+                return commandLine.Length > 0 || imagePath.Length > 0 || workingDir.Length > 0;
             }
             catch { return false; }
             finally { try { CloseHandle(h); } catch { } }
+        }
+
+        /// <summary>
+        /// O texto e o caminho de um diretorio de verdade: raiz de drive
+        /// (C:\) ou UNC (\\server\share\), terminado em barra e existente.
+        /// </summary>
+        private static bool EhDiretorio(string s)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length < 3) return false;
+            if (!s.EndsWith("\\", StringComparison.Ordinal)) return false;
+
+            bool raiz = s.Length == 3 && s[1] == ':';
+            bool drive = s.Length > 3 && s[1] == ':' && s[2] == '\\';
+            bool unc = s.StartsWith("\\\\", StringComparison.Ordinal);
+            if (!raiz && !drive && !unc) return false;
+
+            try { return System.IO.Directory.Exists(s); }
+            catch { return false; }
         }
 
         /// <summary>Nome do arquivo sem a extensao de executavel.</summary>
@@ -217,6 +258,25 @@ namespace CmdWatch
                 int z = s.IndexOf('\0');
                 if (z >= 0) s = s.Substring(0, z);
                 return s.Trim();
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// Igual ao ReadString, mas sem aparar: a barra final do diretorio de
+        /// trabalho (CURDIR) faz parte do caminho.
+        /// </summary>
+        private static string ReadStringRaw(IntPtr h, IntPtr addr, ushort chars)
+        {
+            try
+            {
+                byte[] b = new byte[chars * 2];
+                IntPtr read;
+                if (!ReadProcessMemory(h, addr, b, b.Length, out read)) return "";
+                string s = Encoding.Unicode.GetString(b);
+                int z = s.IndexOf('\0');
+                if (z >= 0) s = s.Substring(0, z);
+                return s;
             }
             catch { return ""; }
         }

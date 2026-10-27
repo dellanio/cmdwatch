@@ -18,6 +18,8 @@ namespace CmdWatch
         public string Name = "";
         public string CmdLine = "";
         public string Path = "";
+        /// <summary>Diretorio de trabalho do processo (lido do PEB).</summary>
+        public string WorkingDir = "";
         public DateTime StartedAt = DateTime.MinValue;
         public uint SessionId;
         public string User = "";
@@ -196,11 +198,12 @@ namespace CmdWatch
         {
             try
             {
-                string cl; string ip;
-                if (NativeProcess.TryGetProcessStrings(p.Pid, p.Name, out cl, out ip))
+                string cl; string ip; string wd;
+                if (NativeProcess.TryGetProcessStrings(p.Pid, p.Name, out cl, out ip, out wd))
                 {
                     if (cl.Length > 0) p.CmdLine = cl;
                     if (ip.Length > 0) p.Path = ip;
+                    if (wd.Length > 0) p.WorkingDir = wd;
                 }
             }
             catch { }
@@ -565,11 +568,25 @@ namespace CmdWatch
         {
             try
             {
-                // apenas nome/ppid: a linha de comando e lida sob demanda (Lookup)
                 foreach (ProcInfo p in PollingEngine.Snapshot())
                 {
                     _table[p.Pid] = p;
                     if (!IsCmd(p)) continue;
+
+                    // o snapshot do Toolhelp so traz nome/ppid: a linha de comando
+                    // (e o diretorio de trabalho) precisam ser lidos do PEB. Sem
+                    // isso, um .cmd que JA estava rodando quando o monitor abriu
+                    // nunca virava sessao - sumia em silencio.
+                    if (p.CmdLine.Length == 0) PollingEngine.HydrateProcess(p);
+                    if (p.CmdLine.Length == 0) continue;
+
+                    // hora real de inicio (o Toolhelp nao expoe): o INICIO da
+                    // sessao tem que ser o do script, nao o da abertura do painel
+                    if (p.StartedAt == DateTime.MinValue)
+                    {
+                        try { p.StartedAt = System.Diagnostics.Process.GetProcessById(p.Pid).StartTime; }
+                        catch { }
+                    }
 
                     string args; string sw;
                     string raw = BatchCmdLine.Extract(p.CmdLine, out args, out sw);
@@ -697,7 +714,7 @@ namespace CmdWatch
                 ScriptName = System.IO.Path.GetFileName(resolved),
                 ScriptArgs = args,
                 RawCmdLine = p.CmdLine,
-                StartedAt = DateTime.Now,
+                StartedAt = p.StartedAt != DateTime.MinValue ? p.StartedAt : DateTime.Now,
                 Analysis = BatchParser.Parse(resolved)
             };
 
@@ -1194,6 +1211,10 @@ namespace CmdWatch
                 var candidates = new List<string>();
                 if (parent != null && parent.ScriptPath.Length > 0)
                     candidates.Add(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(parent.ScriptPath), raw));
+                // o diretorio de trabalho do proprio cmd.exe: e o que o "cmd /c
+                // build.cmd" usa (caminho relativo ao script, nao ao monitor)
+                if (!string.IsNullOrEmpty(cmdProc.WorkingDir))
+                    candidates.Add(System.IO.Path.Combine(cmdProc.WorkingDir, raw));
                 candidates.Add(System.IO.Path.Combine(Environment.CurrentDirectory, raw));
                 candidates.Add(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), raw));
                 candidates.Add(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(cmdProc.Path ?? ""), raw));

@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.9 — cmdwatch.exe (512 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.10 — cmdwatch.exe (512 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.9 |
-| Tamanho | 512 KB (524.288 bytes) |
-| SHA-256 | `9FE8B093E7B003D385C13003460DB70716A811D1C7D0FD8834FA2AA18F369D49` |
+| Versão | 1.0.10 |
+| Tamanho | 512 KB (525.312 bytes) |
+| SHA-256 | `520334BCFAF77F67E0CF3CAADF6946BD57C56A9CABCC167367A082FD414FB8CE` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -184,6 +184,15 @@ O que acontece ao confirmar:
 Em sessão já encerrada o item *Fechar* fica esmaecido (e o `ESC` cancela sem encerrar
 nada). Encerrar um processo que roda como administrador exige rodar o cmdwatch como
 administrador — o painel avisa o motivo caso não consiga.
+
+### Sessões que já estavam rodando (v1.0.10)
+
+O painel passa a mostrar **os scripts `.cmd` que já estavam em execução quando ele abriu** —
+inclusive o horário real de início. Antes, esses scripts eram descartados em silêncio.
+
+E o script chamado por **caminho relativo** (`cmd /c build.cmd`) passou a ser resolvido:
+o cmdwatch usa agora o **diretório de trabalho do próprio `cmd.exe`** (lido do PEB), e não
+o diretório de onde o cmdwatch foi aberto.
 
 ### Minimizar para a bandeja
 
@@ -436,6 +445,10 @@ Tipos: `batch_open`, `batch_step`, `batch_close`.
   reconstrói essa chamada lendo o texto do script que chamou — se o script chamado estiver
   atrás de uma variável que o cmdwatch não consegue resolver, a chamada aparece sem o
   nível exato.
+* **`cmd.exe` que não é script** fica de fora: o cmdwatch monitora scripts `.cmd`/`.bat`.
+  Um `cmd /c npx …` ou `cmd /c vite …` (servidor de desenvolvimento, MCP, `npx`…) abre uma
+  janela de console, mas não é um script — não vira sessão. Para ver esses processos, use o
+  Gerenciador de Tarefas ou um monitor de processos geral.
 * O `cmdwatch` **não bloqueia nem altera** nada: é somente leitura de estado do sistema.
 
 ---

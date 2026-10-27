@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.0.9";
+        internal const string Version = "1.0.10";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -404,6 +404,7 @@ opcoes do trace:
                 sb.Append(",\"scriptName\":" + J.Str(s.ScriptName));
                 sb.Append(",\"args\":" + J.Str(s.ScriptArgs));
                 sb.Append(",\"cmdLine\":" + J.Str(s.RawCmdLine));
+                sb.Append(",\"startedAt\":" + J.Ts(s.StartedAt));
                 sb.Append(",\"durationMs\":" + J.Num((long)(ev.Timestamp - s.StartedAt).TotalMilliseconds));
                 sb.Append(",\"lastLine\":" + J.Num(s.LastLine));
                 sb.Append(",\"stepCount\":" + J.Num(s.StepCount));
