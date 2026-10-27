@@ -140,7 +140,7 @@ namespace CmdWatch.Gui
             _pStream.SetBounds(pad, midY, flowW, midH);
             _pActivity.SetBounds(pad + flowW + pad, midY, Math.Max(240, w - pad * 3 - flowW), midH);
 
-            _checkTray.SetBounds(pad + 2, h - pad - HintH + 4, 460, 24);
+            _checkTray.SetBounds(pad + 2, h - pad - HintH + 4, CheckboxWidth(), 24);
             _lang.SetBounds(w - pad - LangW - 2, h - pad - HintH + 4, LangW, 24);
 
             Rectangle sa = _pSessions.PlotArea;
@@ -160,6 +160,8 @@ namespace CmdWatch.Gui
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(Theme.Bg);
+
+            DrawVersion(e.Graphics);
 
             string info;
             if (_selectedPid != 0)
@@ -181,6 +183,38 @@ namespace CmdWatch.Gui
 
             TextRenderer.DrawText(e.Graphics, info, Theme.Ui, hint,
                 Theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
+        /// <summary>
+        /// Largura do checkbox do rodape: o quadrado (16) + a folga (9) + o texto
+        /// real. Medir o texto evita deixar uma faixa vazia (e, principalmente,
+        /// evita que o fundo do checkbox tape a versao desenhada ao lado).
+        /// </summary>
+        private int CheckboxWidth()
+        {
+            try
+            {
+                int tw = TextRenderer.MeasureText(_checkTray.Label, Theme.Ui).Width;
+                return 16 + 9 + tw + 10;
+            }
+            catch { return 460; }
+        }
+
+        /// <summary>
+        /// Desenha a versao do cmdwatch no rodape, logo depois do checkbox.
+        /// </summary>
+        private void DrawVersion(Graphics g)
+        {
+            try
+            {
+                string ver = "cmdwatch " + Program.Version;
+                int x = (_checkTray != null ? _checkTray.Right : 10) + 18;
+                int y = ClientSize.Height - HintH;
+
+                TextRenderer.DrawText(g, ver, Theme.Ui, new Rectangle(x, y, 220, HintH),
+                    Theme.Dim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            catch { }
         }
 
         // --------------------------------------------------------- motor
@@ -387,6 +421,8 @@ namespace CmdWatch.Gui
             _lang.Invalidate();
             _sessions.Invalidate();
 
+            // o texto do checkbox muda de idioma: refaz o rodape
+            LayoutDashboard();
             RebuildStream();
             ApplyTrayTexts();
             Invalidate();

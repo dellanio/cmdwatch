@@ -37,13 +37,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.7 — cmdwatch.exe (501 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.0.8 — cmdwatch.exe (502 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.7 |
-| Tamanho | 501 KB (513.536 bytes) |
-| SHA-256 | `AFFE2FAF957BDB1745C6E6777E79AEC8337ADD5F0CF597A05267AEB026315259` |
+| Versão | 1.0.8 |
+| Tamanho | 502 KB (514.048 bytes) |
+| SHA-256 | `E98CCAE5689533AFE2F9E438C4A9B556FADCF4409C20C33BF0066255A9C5A95F` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -180,6 +180,13 @@ A preferência fica salva em `%APPDATA%\cmdwatch\ui.cfg` e volta no próximo uso
 > O que troca de idioma é a **interface**. As *explicações dos comandos* (`npm ci` →
 > “instala as dependências…”) vêm do dicionário compartilhado com a CLI e continuam em
 > português — são o conteúdo do produto, não o texto da interface.
+
+### Versão no rodapé (v1.0.8)
+
+O canto inferior direito do painel mostra a versão do cmdwatch em uso (`cmdwatch 1.0.8`),
+para dar para conferir de imediato qual build está rodando — útil quando há mais de uma
+cópia do `.exe` em circulação. É a mesma constante usada pela CLI, então o rodapé e a
+saída de `cmdwatch --version` nunca divergem entre si.
 
 ### Ícone do produto
 
