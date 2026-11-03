@@ -31,6 +31,8 @@ namespace CmdWatch
         public string Filter = "";
         public string LogPath = "";
         public bool IsGui;
+        /// <summary>True quando o observador de janelas esta ligado.</summary>
+        public bool Janelas;
     }
 
     /// <summary>
@@ -65,6 +67,8 @@ namespace CmdWatch
                 info.LogPath.Length == 0 ? Lang.T("logOff") : info.LogPath), HumanRole.Body));
             lines.Add(new HumanLine(Row(Lang.T("bannerFilter"),
                 info.Filter.Length == 0 ? Lang.T("filterNone") : info.Filter), HumanRole.Body));
+            if (info.Janelas)
+                lines.Add(new HumanLine(Row(Lang.T("bannerWindows"), Lang.T("bannerWindowsOn")), HumanRole.Body));
             lines.Add(new HumanLine(info.IsGui ? Lang.T("bannerCaptureGui") : Lang.T("bannerCaptureCli"), HumanRole.Body));
             return lines;
         }
@@ -80,9 +84,17 @@ namespace CmdWatch
             List<HumanLine> lines = new List<HumanLine>();
             if (ev == null) return lines;
 
+            string ts = ev.Timestamp.ToString("HH:mm:ss.fff");
+
+            // eventos de janela: vem antes de tudo, porque nao tem sessao
+            if (ev.Window != null)
+            {
+                RenderJanela(ev, lines, ts);
+                return lines;
+            }
+
             BatchSession s = ev.Session;
             if (s == null) return lines;
-            string ts = ev.Timestamp.ToString("HH:mm:ss.fff");
 
             if (ev.Type == "batch_open")
             {
@@ -166,6 +178,62 @@ namespace CmdWatch
 
             lines.Add(new HumanLine("[" + ts + "] " + ev.Message, HumanRole.Body));
             return lines;
+        }
+
+        /// <summary>
+        /// Eventos de janela. O autor e quem esta por tras da janela: quando a
+        /// janela e de um console, ele vem da pergunta ao console (o processo
+        /// que esta rodando dentro dela), e nao do dono da janela.
+        /// </summary>
+        private static void RenderJanela(WatchEvent ev, List<HumanLine> lines, string ts)
+        {
+            WindowRecord w = ev.Window;
+            if (w == null) return;
+
+            string titulo = w.Title.Length > 0 ? w.Title : "(" + Lang.T("fNoTitle") + ")";
+            string dur = w.DuracaoSeg.ToString("0.0") + "s";
+
+            if (ev.Type == "window_open")
+            {
+                lines.Add(new HumanLine("[" + ts + "] ++ " + Lang.T("winOpenTitle") + "  " + titulo, HumanRole.Open));
+                lines.Add(new HumanLine(Field(Lang.T("fOwner"),
+                    (w.OwnerName.Length > 0 ? w.OwnerName : "?") + " (PID " + w.OwnerPid + ")" +
+                    (w.OwnerCmdLine.Length > 0 ? " -> " + Explain.Truncate(w.OwnerCmdLine, 90) : "")), HumanRole.Body));
+                lines.Add(new HumanLine(Field(Lang.T("fAuthor"),
+                    (w.AuthorName.Length > 0 ? w.AuthorName : "?") + " (PID " + w.AuthorPid + ")" +
+                    (w.AutorPeloConsole ? "  [" + Lang.T("winByConsole") + "]" : "") +
+                    (w.AuthorCmdLine.Length > 0 ? " -> " + Explain.Truncate(w.AuthorCmdLine, 90) : "")), HumanRole.Body));
+                if (w.ConsoleClients.Count > 1)
+                {
+                    lines.Add(new HumanLine(Field(Lang.T("fConsole"),
+                        w.ConsoleClients.Count + " " + Lang.T("fOthers") +
+                        " (" + Explain.Truncate(string.Join(", ", w.ConsoleClients.ToArray()), 90) + ")"), HumanRole.Body));
+                }
+                lines.Add(new HumanLine("", HumanRole.Body));
+                return;
+            }
+
+            if (ev.Type == "window_focus")
+            {
+                lines.Add(new HumanLine("[" + ts + "] -> " + Lang.T("winFocusTitle") + "  " + titulo +
+                    "  (" + w.FocusCount + "x " + Lang.T("fFocusCount") + ")", HumanRole.Step));
+                return;
+            }
+
+            if (ev.Type == "window_hide")
+            {
+                lines.Add(new HumanLine("[" + ts + "] .. " + Lang.T("winHideTitle") + "  " + titulo +
+                    "  (" + dur + ")", HumanRole.Body));
+                return;
+            }
+
+            if (ev.Type == "window_close")
+            {
+                lines.Add(new HumanLine("[" + ts + "] ## " + Lang.T("winCloseTitle") + "  " + titulo +
+                    "  (" + dur + ")", HumanRole.Close));
+                lines.Add(new HumanLine("", HumanRole.Body));
+                return;
+            }
         }
     }
 }

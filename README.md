@@ -1,12 +1,14 @@
 # cmdwatch
 
-Monitor de execução de scripts `.cmd`/`.bat` para Windows. Responde a três perguntas,
+Monitor de execução de scripts `.cmd`/`.bat` para Windows. Responde a quatro perguntas,
 em tempo real:
 
 1. **Qual `.cmd` foi aberto?**
 2. **Quem chamou** (processo pai, com a cadeia de ancestrais até a raiz).
 3. **O que ele está fazendo agora** — qual comando está sendo executado, em qual linha
    de qual arquivo, e o que esse comando significa.
+4. **Que janela apareceu na tela** — e **quem está por trás dela** (o autor, achado pelo
+   próprio console), quanto tempo ela ficou aberta e se tomou o foco.
 
 ```
 [13:50:53.272] >> SESSÃO .CMD ABERTA
@@ -37,13 +39,13 @@ em tempo real:
 Executável pronto para Windows 10/11 — arquivo único, sem DLLs e sem runtime extra
 (precisa apenas do .NET Framework 4.8, já presente no sistema):
 
-**[⬇ cmdwatch v1.0.10 — cmdwatch.exe (512 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ cmdwatch v1.1.0 — cmdwatch.exe (541 KB)](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 | | |
 |---|---|
-| Versão | 1.0.10 |
-| Tamanho | 512 KB (525.312 bytes) |
-| SHA-256 | `520334BCFAF77F67E0CF3CAADF6946BD57C56A9CABCC167367A082FD414FB8CE` |
+| Versão | 1.1.0 |
+| Tamanho | 541 KB (553.984 bytes) |
+| SHA-256 | `20DF02681CD61926082651E2BC270C4CCE4C373BD328AB01F8458ABAB4C6D499` |
 | Página da release | [releases/latest](https://github.com/dellanio/cmdwatch/releases/latest) |
 
 Depois de baixar:
@@ -82,15 +84,55 @@ cmdwatch.exe monitor    # a saída sai no terminal de onde você chamou
 
 O painel é **WinForms nativo dentro do mesmo executável** — sem runtime extra, sem navegador,
 sem Electron. Aceita as mesmas opções do `monitor` (`--filter`, `--interval`, `--engine`,
-`--log`, `--quiet`).
+`--log`, `--quiet`), mais `--fast-interval` e `--no-windows`.
 
-### As três áreas
+### As quatro áreas
 
 | Área | O que mostra |
 |---|---|
 | **SESSÕES .CMD** | Uma linha por script `.cmd` executado: PID, script, quem chamou, comandos observados, última linha mapeada, **data/hora de início** e **data/hora de término** (`em curso` enquanto roda) |
+| **JANELAS VISÍVEIS** | Uma linha por janela na tela: nome, **autor** (quem está por trás dela), comando do autor, início, **duração**, **foco** e estado (`visível` / `oculta` / `fechada`) |
 | **FLUXO DE COMANDOS** | As mensagens do cmdwatch **no mesmo formato do `monitor` do CLI** — cabeçalho, sessão aberta com script/origem/chamador/cadeia/resumo/passos, e cada comando com a linha do script e a explicação |
 | **ATIVIDADE .CMD** | Comandos/s (verde) e sessões abertas/s (vermelho) nos últimos 60 s |
+
+### Janelas visíveis (v1.1.0)
+
+O cmdwatch não lista mais só processos: ele **observa as janelas que existem na tela** e
+descobre **quem está por trás de cada uma**. É o que faltava para separar o incomoda do
+ruído — um `cmd.exe` oculto e um `cmd.exe` que tomou a tela deixarão de ser a mesma coisa.
+
+O que é registrado para cada janela:
+
+| Dado | Como é obtido |
+|---|---|
+| **Janela** | título e classe da janela (`SetWinEventHook`, eventos `OBJECT_CREATE`/`SHOW`/`HIDE` + `SYSTEM_FOREGROUND`) |
+| **Autor** | quem está rodando **dentro daquele console** — não a árvore de processos |
+| **Comando** | a linha de comando do autor |
+| **Início / Duração** | quando a janela apareceu e quanto tempo ela ficou de pé |
+| **Foco** | quantas vezes a janela veio para frente |
+| **Estado** | `visível`, `oculta` ou `fechada` |
+
+**Quem é o autor — e por que a árvore de processos não resolve.** No Windows Terminal, a
+janela pertence ao `WindowsTerminal.exe`, cujo pai é um `svchost.exe` de broker: a árvore
+de processos **não alcança** quem está digitando. A solução do cmdwatch é **perguntar ao
+próprio console**: `AttachConsole` + `GetConsoleProcessList` devolvem os clientes reais do
+console (o `cmdwatch.exe`, o `powershell.exe`…), e é de lá que sai o autor e o comando dele.
+Quando o console não responde, o cmdwatch cai para a árvore de processos — e ainda assim
+**só considera** um dono que seja um shell, nunca o `conhost.exe`/`OpenConsole.exe`, que são
+servidores de console, não autores.
+
+A atribuição pelo console funciona no **painel** (que roda na sua sessão de usuário). No
+modo CLI, o cmdwatch já está anexado a um console — então a pergunta ao console não é
+possível e a atribuição usa a árvore de processos.
+
+Os eventos de janela entram **no mesmo fluxo do CLI** (e no mesmo log JSONL):
+
+```
+[20:50:18.395] .. JANELA ESCONDIDA  C:\Windows\system32\cmd.exe  (13,1s)
+[20:50:18.396] ## JANELA FECHADA  C:\Windows\system32\cmd.exe  (13,1s)
+```
+
+> A janela do próprio cmdwatch **não entra** na lista dele.
 
 ### O fluxo fala a língua do terminal
 
@@ -286,18 +328,54 @@ janela extra.
 
 | Motor | Quando usar | Como funciona |
 |---|---|---|
-| `polling` (padrão) | Sempre, **sem admin** | `CreateToolhelp32Snapshot` (~8 ms por varredura) + leitura do *command line* direto do PEB do processo |
+| `polling` (padrão) | Sempre, **sem admin** | Retrato do sistema via `NtQuerySystemInformation` (13–19 ms, buffer reaproveitado) + leitura do *command line* por `NtQueryInformationProcess` |
 | `wmi` | Com admin | Evento `Win32_ProcessStartTrace` (detecção instantânea) + WMI para a linha de comando |
 
 O `auto` escolhe `wmi` quando o processo roda elevado e `polling` caso contrário.
 
 Por que não WMI em tudo: uma consulta a `Win32_Process` no WMI leva **170–300 ms** nesta
-máquina — scripts `.cmd` curtos terminariam antes de serem vistos. A enumeração via
-Toolhelp + PEB leva ~8 ms e pega inclusive processos que viveram menos de 50 ms.
+máquina — scripts `.cmd` curtos terminariam antes de serem vistos. E o próprio
+`Win32_ProcessStartTrace` **exige admin** (sem elevação ele responde "Acesso negado"), então
+o modo automático continua sendo `polling`.
 
 > A leitura do *command line* pelo PEB não usa offsets fixos de `RTL_USER_PROCESS_PARAMETERS`
 > (que mudam entre versões do Windows): o código varre a região procurando a `UNICODE_STRING`
 > cujo conteúdo começa com o executável do processo.
+
+#### Linha de comando sem permissão de memória (v1.1.0)
+
+Antes, o cmdwatch lia a linha de comando **dentro da memória do processo** (`PROCESS_VM_READ`).
+Um script que roda **elevado** barra essa leitura — e o script sumia do log. Foi o que
+acontecia com a tarefa `Higiene-Remocao`, que abria janela e nunca aparecia.
+
+Agora a leitura principal usa a informação do **kernel**, que pede apenas
+`PROCESS_QUERY_LIMITED_INFORMATION`:
+
+| | Antes | Agora |
+|---|---|---|
+| Consulta | memória do processo (`PROCESS_VM_READ`) | `NtQueryInformationProcess` classe **60** (`ProcessCommandLineInformation`) |
+| Permissão | lê a memória do processo | `PROCESS_QUERY_LIMITED_INFORMATION` |
+| Processo elevado | **invisível** | **visível**, com a linha de comando |
+
+Medido nesta máquina: **628 processos lidos com sucesso** contra 177 falhas — e as falhas
+são exatamente os processos protegidos do SYSTEM. O PEB continua sendo lido só para o
+diretório de trabalho e a imagem do processo (o que um processo elevado não expõe).
+
+#### Intervalo adaptativo (v1.1.0)
+
+O retrato de processos saía a cada **50 ms** e consumia ~29% de um núcleo por instância. Agora
+o cmdwatch alterna entre dois regimes:
+
+| Regime | Quando | Intervalo |
+|---|---|---|
+| **rápido** | nos 10 s seguintes a qualquer atividade | 50 ms |
+| **lento** | parado | **500 ms** |
+
+E, quando **aparece uma janela**, o motor acorda na hora: o evento de janela dispara uma
+consulta dirigida ao processo dono da janela (em vez de um retrato global) e o motor retoma
+imediatamente. Custo medido: **CLI 3,0–3,4%** e **painel 4,8–8,1%** de um núcleo, contra
+~29% antes — com o rastreamento de scripts **igual** (bateria de regressão: 12 chamadas de
+11 formas diferentes, resultado idêntico ao da v1.0.10).
 
 ### Atribuição: quem chamou
 
@@ -349,14 +427,20 @@ Opções:
 | Opção | Padrão | Descrição |
 |---|---|---|
 | `--log <arquivo>` | `cmdwatch-log.jsonl` | Log estruturado (JSONL) |
-| `--interval <ms>` | `50` | Intervalo de amostragem do motor `polling` |
+| `--interval <ms>` | `500` | Intervalo de amostragem do motor `polling` **parado** |
+| `--fast-interval <ms>` | `50` | Intervalo **com atividade** (nos 10 s seguintes a qualquer evento) |
 | `--engine <auto\|polling\|wmi>` | `auto` | Motor de captura |
 | `--duration <seg>` | `0` (infinito) | Encerra após N segundos |
 | `--filter <texto>` | — | Só reporta `.cmd` cujo caminho contenha o texto |
 | `--no-children` | — | Não reporta os comandos internos do script |
+| `--no-windows` | — | Só scripts: não observa as janelas da tela |
 | `--json` | — | Saída JSONL no stdout |
 | `--quiet` | — | Não escreve arquivo de log |
 | `--verbose` | — | Despeja todo processo detectado (diagnóstico) |
+
+O monitor também observa as **janelas**: cada janela que abre, ganha foco ou fecha vira um
+evento (`window_open` / `window_focus` / `window_hide` / `window_close`), com a duração e o
+autor — quem está por trás da janela, perguntando ao console.
 
 ### Painel gráfico
 
@@ -428,16 +512,38 @@ Uma linha JSON por evento:
 {"ts":"2026-10-25T13:50:56.716","type":"batch_close","cmdPid":5400,"durationMs":3444,"stepCount":7}
 ```
 
-Tipos: `batch_open`, `batch_step`, `batch_close`.
+Tipos: `batch_open`, `batch_step`, `batch_close`, `batch_call`.
+
+Os eventos de janela usam o mesmo formato, com um bloco `window`:
+
+```jsonc
+{"ts":"2026-11-03T20:50:05.120","type":"window_open",
+ "window":{"hwnd":"0x1F0A2C","title":"C:\\Windows\\system32\\cmd.exe","class":"ConsoleWindowClass",
+           "ownerPid":51740,"owner":"PING.EXE","ownerCmdLine":"ping -n 8 127.0.0.1",
+           "authorPid":24284,"author":"cmd.exe","authorCmdLine":"cmd /c \"...\\gui-demo.cmd\"",
+           "byConsole":true,"consoleClients":2,
+           "firstSeen":"2026-11-03T20:50:05.120","durationMs":13150,"focusCount":0,
+           "visible":true,"closed":false}}
+```
+
+Tipos de janela: `window_open`, `window_focus`, `window_hide`, `window_close`.
+
+> `byConsole` diz se o autor foi achado **perguntando ao console** (o caminho confiável) ou
+> pela árvore de processos (o *fallback*).
 
 ---
 
 ## Limitações conhecidas
 
-* **Processos que duram menos de ~50 ms** podem escapar do motor `polling`. Com admin,
-  use `--engine wmi` para não perder nenhum.
-* **Linha de comando inacessível** em processos de outro usuário ou elevados — o evento é
-  registrado, mas sem a linha de comando (o `cmdwatch` não tem permissão para ler o PEB alheio).
+* **Processos que duram menos de ~50 ms** podem escapar quando o motor está no intervalo
+  lento (500 ms). Com admin, use `--engine wmi` para não perder nenhum.
+* **Linha de comando inacessível** apenas em processos **protegidos** (SYSTEM) — a consulta
+  limitada lê a linha de comando de processo elevado sem qualquer elevação do cmdwatch.
+  Para processos de outro usuário, o evento é registrado, mas sem a linha de comando.
+* **A atribuição pelo console só funciona no painel.** No modo CLI o cmdwatch já está
+  anexado a um console, e `AttachConsole` só funciona em processo **sem** console próprio —
+  então o autor vem da árvore de processos. Com `--no-windows` a observação de janelas é
+  desligada por completo.
 * **Comandos internos do `cmd.exe`** (`echo`, `cd`, `if`, `for`, `goto`) não geram processo
   filho, então não são observáveis pelo monitor passivo. Para ver a sequência completa de
   um script específico, use o modo `trace`.
@@ -445,10 +551,10 @@ Tipos: `batch_open`, `batch_step`, `batch_close`.
   reconstrói essa chamada lendo o texto do script que chamou — se o script chamado estiver
   atrás de uma variável que o cmdwatch não consegue resolver, a chamada aparece sem o
   nível exato.
-* **`cmd.exe` que não é script** fica de fora: o cmdwatch monitora scripts `.cmd`/`.bat`.
-  Um `cmd /c npx …` ou `cmd /c vite …` (servidor de desenvolvimento, MCP, `npx`…) abre uma
-  janela de console, mas não é um script — não vira sessão. Para ver esses processos, use o
-  Gerenciador de Tarefas ou um monitor de processos geral.
+* **`cmd.exe` que não é script** fica de fora das *sessões*: o cmdwatch monitora scripts
+  `.cmd`/`.bat`. Um `cmd /c npx …` ou `cmd /c vite …` (servidor de desenvolvimento, MCP,
+  `npx`…) **não vira sessão** — mas a **janela** dele aparece na lista *JANELAS VISÍVEIS*,
+  com o autor e a duração.
 * O `cmdwatch` **não bloqueia nem altera** nada: é somente leitura de estado do sistema.
 
 ---
@@ -466,7 +572,7 @@ estiver em `.build\roslyn`, o `build.ps1` baixa automaticamente — ou use o
 ```powershell
 & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:exe /out:out\cmdwatch.exe `
   /r:System.Management.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-  src\Core.cs src\Monitor.cs src\NativeProcess.cs src\Program.cs src\gui\*.cs
+  src\*.cs src\gui\*.cs
 ```
 
 ⚠️ O `csc.exe` do framework é o compilador **C# 5**; o código usa recursos mais novos.
@@ -490,7 +596,8 @@ cmdwatch/
 ├── src/
 │   ├── Core.cs          parser de .cmd, dicionário de explicações, JSON
 │   ├── Monitor.cs       engines de captura, atribuição, sessões, árvore de chamadas
-│   ├── NativeProcess.cs Toolhelp + leitura de PEB
+│   ├── NativeProcess.cs Toolhelp, retrato rápido do sistema e leitura de PEB/linha de comando
+│   ├── WindowWatcher.cs observação das janelas da tela (eventos, duração, foco, autor)
 │   ├── HumanFormat.cs   formato das mensagens (CLI e painel usam o mesmo)
 │   ├── Lang.cs          dicionário PT-BR/EN e persistência da preferência
 │   ├── ConsoleHost.cs   console dos modos de terminal (winexe)
@@ -500,7 +607,7 @@ cmdwatch/
 │       ├── Theme.cs         paleta cinza + matriz de pixels 5×7 + fonte dos títulos
 │       ├── ScrollTheme.cs   cores da barra de rolagem conforme o tema do Windows
 │       ├── TechTitle.cs     renderizador dos títulos (tracking, gradiente, halo neon)
-│       ├── Widgets.cs       painéis, tabela de sessões, gráfico, fluxo e seletor de idioma
+│       ├── Widgets.cs       painéis, tabela de sessões, tabela de janelas, gráfico, fluxo e seletor de idioma
 │       ├── NeonMenu.cs      menu de contexto no tema (renderer do ToolStrip)
 │       ├── NeonDialog.cs    diálogo de confirmação no tema
 │       ├── AppIcon.cs       carrega o ícone embutido (janela e bandeja)

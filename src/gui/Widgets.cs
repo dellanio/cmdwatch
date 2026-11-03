@@ -37,6 +37,42 @@ namespace CmdWatch.Gui
         public RunInfo Banner;       // cabecalho do log (null em eventos)
     }
 
+    /// <summary>Linha da tabela de janelas visiveis exibida no painel.</summary>
+    internal sealed class WindowRow
+    {
+        public IntPtr Hwnd;
+        public string Title = "";
+        public string Author = "";
+        public string CmdLine = "";
+        public DateTime StartedAt = DateTime.Now;
+        public DateTime? ClosedAt;
+        public int Focus;
+        public bool Visible = true;
+        public bool Closed;
+        public bool ByConsole;
+
+        /// <summary>Quanto tempo a janela ficou na tela (correndo enquanto aberta).</summary>
+        public double DuracaoSeg
+        {
+            get
+            {
+                DateTime fim = ClosedAt ?? DateTime.Now;
+                double s = (fim - StartedAt).TotalSeconds;
+                return s < 0 ? 0 : s;
+            }
+        }
+
+        public string Estado
+        {
+            get
+            {
+                if (Closed) return Lang.T("winClosed");
+                if (!Visible) return Lang.T("winHidden");
+                return Lang.T("winVisible");
+            }
+        }
+    }
+
     /// <summary>Paineis com cabecalho em matriz de pixels e moldura arredondada.</summary>
     internal sealed class NeonPanel : Control
     {
@@ -66,8 +102,13 @@ namespace CmdWatch.Gui
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.None;
-            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-            Theme.DrawPanel(g, r, 8, Theme.Panel, Theme.Border);
+
+            // o fundo (gradiente, borda e marcações) nao muda entre repinturas:
+            // fica guardado como bitmap e e copiado - o gradiente por paint era
+            // um dos maiores custos do painel
+            Bitmap fundo = Fundo();
+            if (fundo != null) g.DrawImage(fundo, 0, 0);
+            else Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
 
             Rectangle head = new Rectangle(12, 2, Math.Max(10, Width - 24), HeaderHeight - 4);
             if (Title.Length > 0)
@@ -80,16 +121,39 @@ namespace CmdWatch.Gui
                 if (12 + tw + 18 + vw < Width - 12)
                     TechTitle.Draw(g, TitleValue, head, Accent, true);
             }
+        }
 
-            using (Pen p = new Pen(Theme.Grid))
-                g.DrawLine(p, 10, HeaderHeight, Math.Max(10, Width - 11), HeaderHeight);
+        private Bitmap _fundo;
+        private int _fundoW = -1, _fundoH = -1;
 
-            // marcacoes de escala sob a linha do cabecalho (detalhe de instrumento)
-            using (Pen tick = new Pen(Color.FromArgb(70, Accent)))
+        private Bitmap Fundo()
+        {
+            if (Width <= 0 || Height <= 0) return null;
+            if (_fundo != null && _fundoW == Width && _fundoH == Height) return _fundo;
+
+            try { if (_fundo != null) _fundo.Dispose(); } catch { }
+            _fundo = new Bitmap(Math.Max(1, Width), Math.Max(1, Height),
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            _fundoW = Width;
+            _fundoH = Height;
+
+            using (Graphics g = Graphics.FromImage(_fundo))
             {
-                for (int x = 14; x < Width - 12; x += 14)
-                    g.DrawLine(tick, x, HeaderHeight - 3, x, HeaderHeight);
+                g.Clear(Theme.Bg);
+                g.SmoothingMode = SmoothingMode.None;
+                Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
+
+                using (Pen p = new Pen(Theme.Grid))
+                    g.DrawLine(p, 10, HeaderHeight, Math.Max(10, Width - 11), HeaderHeight);
+
+                // marcacoes de escala sob a linha do cabecalho (detalhe de instrumento)
+                using (Pen tick = new Pen(Color.FromArgb(70, Accent)))
+                {
+                    for (int x = 14; x < Width - 12; x += 14)
+                        g.DrawLine(tick, x, HeaderHeight - 3, x, HeaderHeight);
+                }
             }
+            return _fundo;
         }
     }
 
@@ -776,6 +840,192 @@ namespace CmdWatch.Gui
             SelectedPid = pid;
             Invalidate();
             if (SelectionChanged != null) SelectionChanged();
+        }
+    }
+
+    /// <summary>
+    /// Tabela de janelas visiveis: titulo, autor (quem esta por tras da
+    /// janela), processo, inicio, duracao, quantas vezes ganhou o foco e o
+    /// estado atual. Desenhada a mao, como a tabela de sessoes.
+    /// </summary>
+    internal sealed class WindowTable : Control
+    {
+        public List<WindowRow> Rows = new List<WindowRow>();
+        public int RowHeight = 22;
+
+        private int _scroll;
+
+        public WindowTable()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.PanelDeep;
+        }
+
+        private const int HeaderH = 20;
+
+        // colunas: janela, autor, comando, inicio, duracao, foco, estado
+        private static readonly string[] Titulos =
+        {
+            "colWindow", "colAuthor", "fCommand", "colStart", "colDuration", "colFocus", "colState"
+        };
+
+        private static readonly int[] Minimos = { 110, 96, 150, 112, 72, 44, 74 };
+
+        private List<KeyValuePair<string, int>> _colunas = new List<KeyValuePair<string, int>>();
+
+        /// <summary>
+        /// Monta as colunas que cabem na largura. Quando a coluna e estreita (o
+        /// painel divide a tela com o fluxo), as opcionais saem primeiro: o
+        /// titulo e o autor nunca podem faltar - sao a informacao principal.
+        /// </summary>
+        private void MontarColunas(int total)
+        {
+            bool[] usar = new bool[Titulos.Length];
+            for (int i = 0; i < usar.Length; i++) usar[i] = true;
+
+            int soma = 0;
+            for (int i = 0; i < usar.Length; i++) soma += Minimos[i];
+
+            // ordem em que as colunas opcionais saem quando nao cabe
+            int[] ordem = { 2, 3, 5, 4, 6 };
+            for (int i = 0; i < ordem.Length && soma > total; i++)
+            {
+                usar[ordem[i]] = false;
+                soma -= Minimos[ordem[i]];
+            }
+
+            var lista = new List<KeyValuePair<string, int>>();
+            int sobra = Math.Max(0, total - soma - 10);
+            int titulo = sobra / 2;
+            int autor = sobra - titulo;
+
+            for (int i = 0; i < usar.Length; i++)
+            {
+                if (!usar[i]) continue;
+                int w = Minimos[i];
+                if (i == 0) w += titulo;
+                else if (i == 1) w += autor;
+                lista.Add(new KeyValuePair<string, int>(Titulos[i], w));
+            }
+            _colunas = lista;
+        }
+
+        private static string Stamp(DateTime t)
+        {
+            return t.ToString("dd/MM HH:mm:ss");
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+            MontarColunas(Width);
+
+            using (SolidBrush b = new SolidBrush(Theme.Panel))
+                g.FillRectangle(b, new Rectangle(0, 0, Width, HeaderH));
+            using (Pen p = new Pen(Theme.Grid))
+                g.DrawLine(p, 0, HeaderH - 1, Width, HeaderH - 1);
+
+            int x = 10;
+            foreach (KeyValuePair<string, int> col in _colunas)
+            {
+                TextRenderer.DrawText(g, Lang.T(col.Key), Theme.UiBold,
+                    new Rectangle(x, 0, col.Value - 6, HeaderH), Theme.Dim,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                x += col.Value;
+            }
+
+            if (Rows.Count == 0)
+            {
+                TextRenderer.DrawText(g, Lang.T("noWindows"), Theme.Ui,
+                    new Rectangle(10, HeaderH + 10, Width - 20, 20), Theme.Dim,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                return;
+            }
+
+            int visiveis = Math.Max(1, (Height - HeaderH) / RowHeight);
+            if (_scroll > Rows.Count - visiveis) _scroll = Math.Max(0, Rows.Count - visiveis);
+            if (_scroll < 0) _scroll = 0;
+
+            for (int i = 0; i < visiveis && _scroll + i < Rows.Count; i++)
+            {
+                WindowRow r = Rows[_scroll + i];
+                int y = HeaderH + i * RowHeight;
+                Rectangle b = new Rectangle(0, y, Width, RowHeight);
+
+                Color estado = r.Closed ? Theme.Red : (r.Visible ? Theme.Green : Theme.Amber);
+                using (SolidBrush br = new SolidBrush(i % 2 == 0 ? Theme.PanelDeep : Theme.Panel))
+                    g.FillRectangle(br, b);
+                using (SolidBrush br = new SolidBrush(Color.FromArgb(180, estado)))
+                    g.FillRectangle(br, new Rectangle(2, y + 3, 3, RowHeight - 6));
+
+                var cells = new List<string>();
+                var cores = new List<Color>();
+                foreach (KeyValuePair<string, int> col in _colunas)
+                {
+                    switch (col.Key)
+                    {
+                        case "colWindow":
+                            cells.Add(r.Title.Length > 0 ? r.Title : Lang.T("fNoTitle"));
+                            cores.Add(Theme.Text);
+                            break;
+                        case "colAuthor":
+                            cells.Add(r.Author);
+                            cores.Add(r.ByConsole ? Theme.Amber : Theme.Cyan);
+                            break;
+                        case "fCommand":
+                            cells.Add(r.CmdLine);
+                            cores.Add(Theme.Dim);
+                            break;
+                        case "colStart":
+                            cells.Add(Stamp(r.StartedAt));
+                            cores.Add(Theme.Dim);
+                            break;
+                        case "colDuration":
+                            cells.Add(r.DuracaoSeg.ToString("0.0") + "s");
+                            cores.Add(Theme.Text);
+                            break;
+                        case "colFocus":
+                            cells.Add(r.Focus > 0 ? r.Focus.ToString() : "-");
+                            cores.Add(r.Focus > 0 ? Theme.Green : Theme.Dim);
+                            break;
+                        default:
+                            cells.Add(r.Estado);
+                            cores.Add(estado);
+                            break;
+                    }
+                }
+
+                int cx = 10;
+                for (int c = 0; c < cells.Count && c < _colunas.Count; c++)
+                {
+                    TextRenderer.DrawText(g, cells[c], Theme.MonoSmall,
+                        new Rectangle(cx, y, Math.Max(10, _colunas[c].Value - 6), RowHeight), cores[c],
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                        TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    cx += _colunas[c].Value;
+                }
+            }
+
+            if (Rows.Count > visiveis)
+            {
+                int trackH = visiveis * RowHeight;
+                int barH = Math.Max(28, trackH * visiveis / Rows.Count);
+                int barY = HeaderH + (trackH - barH) * _scroll / Math.Max(1, Rows.Count - visiveis);
+                Theme.DrawScrollThumb(g, new Rectangle(Width - 6, barY, 4, barH), ScrollTheme.Thumb);
+            }
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            int visiveis = Math.Max(1, (Height - HeaderH) / RowHeight);
+            int max = Math.Max(0, Rows.Count - visiveis);
+            _scroll -= e.Delta / 120;
+            if (_scroll > max) _scroll = max;
+            if (_scroll < 0) _scroll = 0;
+            Invalidate();
         }
     }
 }

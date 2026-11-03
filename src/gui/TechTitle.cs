@@ -17,6 +17,16 @@ namespace CmdWatch.Gui
         private const float Tracking = 2.4f;
         private static readonly Dictionary<char, float> WidthCache = new Dictionary<char, float>();
 
+        /// <summary>
+        /// Titulo ja desenhado, guardado como bitmap.
+        ///
+        /// Cada letra e desenhada SEIS vezes (quatro do halo, uma da sombra e
+        /// uma do corpo) - um titulo de 15 letras virava 90 chamadas de
+        /// DrawString, e o painel repintava varias vezes por segundo. Como o
+        /// texto quase nunca muda, o desenho e feito uma vez e reaproveitado.
+        /// </summary>
+        private static readonly Dictionary<string, Bitmap> Cache = new Dictionary<string, Bitmap>();
+
         public static void Draw(Graphics g, string text, Rectangle area, Color color)
         {
             Draw(g, text, area, color, false);
@@ -39,31 +49,72 @@ namespace CmdWatch.Gui
 
             string up = text.ToUpperInvariant();
             float total = MeasureWidth(g, up, f);
+            if (total <= 0) { g.TextRenderingHint = old; return; }
+
             float x = rightAlign ? area.Right - total : area.Left;
             float y = area.Y + (area.Height - f.GetHeight(g)) / 2f;
 
-            // halo: 4 passadas deslocadas em uma cor translucida
-            using (SolidBrush glow = new SolidBrush(Color.FromArgb(44, color)))
+            string key = up + "|" + color.ToArgb() + "|" + Math.Round(total) + "|" + Math.Round(f.GetHeight(g));
+            Bitmap bmp;
+            if (!Cache.TryGetValue(key, out bmp) || bmp == null)
             {
-                int[] dx = { -2, 2, 0, 0 };
-                int[] dy = { 0, 0, -2, 2 };
-                for (int i = 0; i < 4; i++)
-                    DrawTracked(g, up, f, x + dx[i], y + dy[i], glow);
+                bmp = Render(up, f, color, total);
+                Cache[key] = bmp;
+                if (Cache.Count > 80)
+                {
+                    List<string> velho = new List<string>();
+                    foreach (var kv in Cache) velho.Add(kv.Key);
+                    for (int i = 0; i < velho.Count / 2; i++)
+                    {
+                        Bitmap b;
+                        if (Cache.TryGetValue(velho[i], out b)) { try { b.Dispose(); } catch { } }
+                        Cache.Remove(velho[i]);
+                    }
+                }
             }
 
-            // sombra dura para dar profundidade
-            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(130, Color.Black)))
-                DrawTracked(g, up, f, x + 1, y + 1, shadow);
-
-            // corpo com gradiente (topo mais claro)
-            using (LinearGradientBrush grad = new LinearGradientBrush(
-                    new RectangleF(x, y, Math.Max(1f, total), f.GetHeight(g)),
-                    Lighten(color, 0.5f), color, LinearGradientMode.Vertical))
-            {
-                DrawTracked(g, up, f, x, y, grad);
-            }
-
+            g.DrawImage(bmp, (int)Math.Round(x) - 2, (int)Math.Round(y) - 2);
             g.TextRenderingHint = old;
+        }
+
+        /// <summary>Desenha o titulo uma vez e devolve o bitmap pronto.</summary>
+        private static Bitmap Render(string up, Font f, Color color, float total)
+        {
+            int w = (int)Math.Ceiling(total) + 8;
+            int h = (int)Math.Ceiling(f.GetHeight()) + 8;
+            if (w < 4) w = 4;
+            if (h < 4) h = 4;
+
+            Bitmap bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.Transparent);
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+                float x = 3, y = 3;
+
+                // halo: 4 passadas deslocadas em uma cor translucida
+                using (SolidBrush glow = new SolidBrush(Color.FromArgb(44, color)))
+                {
+                    int[] dx = { -2, 2, 0, 0 };
+                    int[] dy = { 0, 0, -2, 2 };
+                    for (int i = 0; i < 4; i++)
+                        DrawTracked(g, up, f, x + dx[i], y + dy[i], glow);
+                }
+
+                // sombra dura para dar profundidade
+                using (SolidBrush shadow = new SolidBrush(Color.FromArgb(130, Color.Black)))
+                    DrawTracked(g, up, f, x + 1, y + 1, shadow);
+
+                // corpo com gradiente (topo mais claro)
+                using (LinearGradientBrush grad = new LinearGradientBrush(
+                        new RectangleF(x, y, Math.Max(1f, total), f.Height),
+                        Lighten(color, 0.5f), color, LinearGradientMode.Vertical))
+                {
+                    DrawTracked(g, up, f, x, y, grad);
+                }
+            }
+            return bmp;
         }
 
         public static float MeasureWidth(Graphics g, string text, Font f)

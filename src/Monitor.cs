@@ -24,6 +24,8 @@ namespace CmdWatch
         public uint SessionId;
         public string User = "";
         public bool HasCmdLine => !string.IsNullOrEmpty(CmdLine);
+        /// <summary>True quando a linha de comando ja foi lida (evita reler).</summary>
+        public bool Hydrated;
 
         public string ExeKey
         {
@@ -60,6 +62,7 @@ namespace CmdWatch
         public ProcInfo Process;
         public BatchStep Step;
         public ScriptFrame Frame;
+        public WindowRecord Window;
         public string Message = "";
         public double Confidence;
     }
@@ -109,10 +112,41 @@ namespace CmdWatch
     internal sealed class PollingEngine : IEngine
     {
         public static bool Verbose;
+        /// <summary>Mostra o tempo gasto por retrato (diagnostico).</summary>
+        public static bool Timing;
         private readonly int _intervalMs;
         private readonly Dictionary<int, ProcInfo> _known = new Dictionary<int, ProcInfo>();
         private Thread _thread;
         private volatile bool _running;
+
+        /// <summary>
+        /// Sinal para acordar o motor na hora de um evento (uma janela nova).
+        /// Sem isso o motor so acordaria no proximo retrato - e o retrato e caro.
+        /// </summary>
+        public ManualResetEvent Wake;
+
+        /// <summary>
+        /// Decide se um processo novo merece a leitura da linha de comando.
+        /// Ler a linha de comando custa uma abertura de processo; fazer isso
+        /// para TODO processo que nasce era metade do custo do painel.
+        /// </summary>
+        public Func<ProcInfo, bool> NeedsDetail;
+
+        /// <summary>
+        /// Intervalo minimo entre dois retratos, mesmo que o sinal de janela
+        /// acorde o motor antes da hora. O retrato do sistema inteiro custa
+        /// ~19ms com 800 processos: acordar a cada evento de janela gastaria
+        /// um nucleo inteiro.
+        /// </summary>
+        public const int MinIntervalMs = 200;
+
+        /// <summary>
+        /// De quanto em quanto tempo o motor espera, decidido por quem observa
+        /// os scripts: rapido (50ms) enquanto ha script ativo, lento (500ms)
+        /// quando a maquina esta parada. Sem isso, ou o custo sobe, ou os
+        /// comandos curtos (que duram menos de meio segundo) escapam.
+        /// </summary>
+        public Func<int> IntervalProvider;
 
         public string Name { get { return "polling"; } }
 
@@ -138,11 +172,19 @@ namespace CmdWatch
 
         private void Loop(Action<ProcInfo> onStart, Action<int> onExit)
         {
+            int voltas = 0;
+            DateTime proximo = DateTime.Now.AddMilliseconds(_intervalMs);
             while (_running)
             {
                 try
                 {
+                    // um evento de janela chegou: limpa o sinal e retrato agora
+                    if (Wake != null) { try { Wake.Reset(); } catch { } }
+
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
                     var snap = Snapshot();
+                    double tRetrato = sw.Elapsed.TotalMilliseconds;
+
                     var seen = new HashSet<int>();
                     foreach (ProcInfo p in snap)
                     {
@@ -156,7 +198,9 @@ namespace CmdWatch
 
                         if (isNew)
                         {
-                            ProcInfo full = Hydrate(p);
+                            // so le a linha de comando quando ela interessa
+                            ProcInfo full = p;
+                            if (PrecisaDetalhes(p)) full = Hydrate(p);
                             _known[p.Pid] = full;
                             try { onStart(full); }
                             catch (Exception ex)
@@ -177,15 +221,73 @@ namespace CmdWatch
                         _known.Remove(pid);
                         try { onExit(pid); } catch { }
                     }
+                    double tCiclo = sw.Elapsed.TotalMilliseconds;
+
+                    voltas++;
+                    if (Timing && voltas % 20 == 0)
+                    {
+                        Console.Error.WriteLine("  [tempo] retrato=" + tRetrato.ToString("0.0") +
+                            "ms ciclo=" + tCiclo.ToString("0.0") + "ms processos=" + snap.Count +
+                            " consulta=" + NativeProcess.UltimaConsultaMs.ToString("0.0") +
+                            " leitura=" + NativeProcess.UltimaLeituraMs.ToString("0.0") +
+                            " status=" + NativeProcess.UltimoStatus +
+                            " tam=" + NativeProcess.UltimoTamanho);
+                    }
+
+                    // espera ate o proximo prazo. O sinal de uma janela pode
+                    // adiantar o retrato, mas nao mais que uma vez por
+                    // intervalo: o retrato e caro e os eventos de janela sao
+                    // muitos. O intervalo vem de quem observa os scripts:
+                    // rapido com script ativo, lento quando tudo esta parado.
+                    int espera = IntervaloAtual();
+                    int minimo = espera < MinIntervalMs ? espera : MinIntervalMs;
+                    DateTime inicio = DateTime.Now;
+                    while (_running)
+                    {
+                        long falta = (long)((inicio.AddMilliseconds(espera) - DateTime.Now).TotalMilliseconds);
+                        if (falta <= 0) break;
+                        bool sinal;
+                        if (Wake != null) sinal = Wake.WaitOne((int)falta);
+                        else { Thread.Sleep((int)falta); sinal = false; }
+                        if (!sinal) break;                       // cumpriu o intervalo
+                        if ((DateTime.Now - inicio).TotalMilliseconds >= minimo) break;
+                        // sinal cedo demais: descarta e continua esperando
+                        try { Wake.Reset(); } catch { }
+                    }
                 }
                 catch { }
-                Thread.Sleep(_intervalMs);
             }
+        }
+
+        /// <summary>Intervalo atual: o que quem observa os scripts pedir.</summary>
+        private int IntervaloAtual()
+        {
+            if (IntervalProvider != null)
+            {
+                try { int v = IntervalProvider(); if (v > 0) return v; } catch { }
+            }
+            return _intervalMs;
+        }
+
+        private bool PrecisaDetalhes(ProcInfo p)
+        {
+            if (NeedsDetail == null) return true;
+            try { return NeedsDetail(p); }
+            catch { return true; }
         }
 
         /// <summary>Enumera processos: caminho nativo (rapido) com fallback para WMI.</summary>
         public static List<ProcInfo> Snapshot()
         {
+            // o retrato rapido (uma chamada ao kernel) traz nome, pid, pai e a
+            // hora de criacao de cada processo: ~2ms contra os ~34ms do Toolhelp
+            try
+            {
+                List<ProcInfo> rapido = NativeProcess.SnapshotFast();
+                if (rapido != null && rapido.Count > 0) return rapido;
+            }
+            catch { }
+
             List<ProcInfo> native = null;
             try { native = NativeProcess.Snapshot(); } catch { }
             if (native != null && native.Count > 0) return native;
@@ -198,6 +300,8 @@ namespace CmdWatch
         {
             try
             {
+                if (p.Hydrated) return p;
+                p.Hydrated = true;
                 string cl; string ip; string wd;
                 if (NativeProcess.TryGetProcessStrings(p.Pid, p.Name, out cl, out ip, out wd))
                 {
@@ -549,6 +653,7 @@ namespace CmdWatch
         private readonly Dictionary<int, ProcInfo> _table = new Dictionary<int, ProcInfo>();
         private readonly Dictionary<int, ScriptFrame> _frames = new Dictionary<int, ScriptFrame>();
         private readonly Dictionary<int, BatchSession> _sessions = new Dictionary<int, BatchSession>();
+        private readonly HashSet<int> _processados = new HashSet<int>();
         private readonly object _lock = new object();
 
         public Action<WatchEvent> OnEvent;
@@ -626,7 +731,17 @@ namespace CmdWatch
         public void OnProcessStart(ProcInfo p)
         {
             if (p == null || p.Pid <= 0) return;
-            lock (_lock) { _table[p.Pid] = p; }
+            bool novo;
+            lock (_lock)
+            {
+                // um processo pode ser descoberto duas vezes: pela janela que
+                // ele abriu e pelo retrato seguinte.-processado evita a sessao
+                // duplicada
+                novo = !_processados.Contains(p.Pid);
+                _table[p.Pid] = p;
+                if (novo) _processados.Add(p.Pid);
+            }
+            if (!novo) return;
 
             if (Verbose)
             {
@@ -1129,6 +1244,7 @@ namespace CmdWatch
             lock (_lock)
             {
                 _table.Remove(pid);
+                _processados.Remove(pid);
                 ScriptFrame frame;
                 if (_frames.TryGetValue(pid, out frame))
                 {
@@ -1161,12 +1277,22 @@ namespace CmdWatch
             lock (_lock) { _table.TryGetValue(pid, out p); }
             if (p != null)
             {
-                if (p.CmdLine.Length == 0)
+                if (!p.Hydrated)
                 {
                     PollingEngine.HydrateProcess(p);
                     lock (_lock) { _table[pid] = p; }
                 }
                 return p;
+            }
+
+            // processo que o retrato ainda nao viu: consulta DIRIGIDA (barata,
+            // sem varrer o sistema). So se ela falhar vale a pena um retrato
+            // geral.
+            ProcInfo direto;
+            if (NativeProcess.TryGetProcessInfo(pid, out direto))
+            {
+                lock (_lock) { _table[pid] = direto; }
+                return direto;
             }
 
             // processo anterior ao inicio do monitor: busca sob demanda (Toolhelp + PEB)
@@ -1182,6 +1308,82 @@ namespace CmdWatch
             }
             catch { }
             return null;
+        }
+
+        /// <summary>Procura um processo (usado pelo observador de janelas).</summary>
+        public ProcInfo Buscar(int pid)
+        {
+            if (pid <= 0) return null;
+            return Lookup(pid);
+        }
+
+        /// <summary>
+        /// Processa um processo AGORA, sem esperar o proximo retrato.
+        ///
+        /// Usado quando uma janela aparece: o dono da janela e o processo que
+        /// acabou de nascer, e um retrato geral do sistema seria caro demais
+        /// para cada evento de janela. A consulta e dirigida (um processo so).
+        /// </summary>
+        public void Despertar(int pid)
+        {
+            if (pid <= 0) return;
+            try
+            {
+                lock (_lock) { if (_processados.Contains(pid)) return; }
+                ProcInfo p = Lookup(pid);
+                if (p == null) return;
+                // um cmd.exe precisa do diretorio de trabalho: sem ele, um
+                // script chamado por caminho relativo nao e resolvido
+                if (IsCmd(p)) PollingEngine.HydrateProcess(p);
+                lock (_lock) { if (_processados.Contains(pid)) return; }
+                OnProcessStart(p);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Descendants de um processo na arvore (usado pelo observador de
+        /// janelas quando o dono da janela nao tem console: o autor e o filho
+        /// que ele acabou de lancar).
+        /// </summary>
+        public List<int> FilhosDe(int pid)
+        {
+            var res = new List<int>();
+            if (pid <= 0) return res;
+            var guard = new HashSet<int>();
+            var fila = new Queue<int>();
+            fila.Enqueue(pid);
+            while (fila.Count > 0 && res.Count < 64)
+            {
+                int atual = fila.Dequeue();
+                List<int> filhos;
+                lock (_lock)
+                {
+                    filhos = new List<int>();
+                    foreach (var kv in _table)
+                        if (kv.Value.ParentPid == atual) filhos.Add(kv.Key);
+                }
+                foreach (int f in filhos)
+                {
+                    if (!guard.Add(f)) continue;
+                    res.Add(f);
+                    fila.Enqueue(f);
+                }
+            }
+            return res;
+        }
+
+        /// <summary>
+        /// Vale a pena ler a linha de comando deste processo novo?
+        /// Só o cmd.exe e os filhos de um script em execucao precisam: ler a
+        /// linha de comando de todo processo que nasce era caro sem proveito.
+        /// </summary>
+        public bool PrecisaDetalhes(ProcInfo p)
+        {
+            if (p == null) return false;
+            if (p.Name != null && p.Name.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase)) return true;
+            lock (_lock) { if (_frames.ContainsKey(p.ParentPid)) return true; }
+            return false;
         }
 
         private List<ProcInfo> Ancestors(ProcInfo start, int max)
@@ -1229,7 +1431,34 @@ namespace CmdWatch
 
         private void Emit(WatchEvent ev)
         {
+            // qualquer evento e atividade: e o sinal para o motor acelerar
+            _ultimaAtividade = DateTime.Now;
             if (OnEvent != null) { try { OnEvent(ev); } catch { } }
+        }
+
+        // ------------------------------------------------------- atividade
+        private DateTime _ultimaAtividade = DateTime.MinValue;
+
+        /// <summary>Intervalo rapido (com script ativo) e lento (parado).</summary>
+        public int IntervaloRapidoMs = 50;
+        public int IntervaloLentoMs = 500;
+
+        /// <summary>
+        /// De quanto em quanto tempo o motor deve retratoar.
+        ///
+        /// Com script ativo (algo aconteceu nos ultimos segundos) o motor
+        /// acelera, para nao perder comandos que duram menos de meio segundo -
+        /// e o que a v1.0.10 fazia o tempo todo, gastando um nucleo. Parado,
+        /// o motor espera 500ms e o custo cai para poucos por cento.
+        ///
+        /// A janela e de 10 segundos de proposito: um script pode ficar
+        /// quieto enquanto um comando demorado roda (ping -n 6, por
+        /// exemplo) e o comando seguinte nao pode escapar.
+        /// </summary>
+        public int IntervaloAtual()
+        {
+            if ((DateTime.Now - _ultimaAtividade).TotalSeconds < 10.0) return IntervaloRapidoMs;
+            return IntervaloLentoMs;
         }
     }
 

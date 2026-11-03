@@ -44,6 +44,20 @@ namespace CmdWatch
             { "cmdPerSec",     new[] { "COMANDOS/S", "CMDS/S" } },
             { "sessPerSec",    new[] { "SESSOES/S",  "SESS/S" } },
 
+            // -------------------------------------------- painel de janelas
+            { "windows",       new[] { "JANELAS VISIVEIS", "VISIBLE WINDOWS" } },
+            { "windowsShort",  new[] { "JANELAS",          "WINDOWS" } },
+            { "colWindow",     new[] { "JANELA",   "WINDOW" } },
+            { "colAuthor",     new[] { "AUTOR",    "AUTHOR" } },
+            { "colFocus",      new[] { "FOCO",     "FOCUS" } },
+            { "colDuration",   new[] { "DURACAO",  "DURATION" } },
+            { "colState",      new[] { "ESTADO",   "STATE" } },
+            { "noWindows",     new[] { "nenhuma janela visivel observada ainda", "no visible window observed yet" } },
+            { "winVisible",    new[] { "visivel",  "visible" } },
+            { "winHidden",     new[] { "oculta",   "hidden" } },
+            { "winClosed",     new[] { "fechada",  "closed" } },
+            { "winByConsole",  new[] { "pelo console", "by console" } },
+
             { "langLabel",     new[] { "IDIOMA",                   "LANGUAGE" } },
             { "switchLang",    new[] { "Trocar o idioma da interface", "Switch the interface language" } },
             { "trayTitle",     new[] { "cmdwatch - monitor de execucao", "cmdwatch - execution monitor" } },
@@ -106,7 +120,22 @@ namespace CmdWatch
             { "engineNoAdmin",    new[] { "(sem admin)",       "(no admin)" } },
             { "engineInstant",    new[] { "evento instantaneo", "instant event" } },
             { "filterNone",       new[] { "(todos)",           "(all)" } },
-            { "logOff",           new[] { "(desativado)",      "(disabled)" } }
+            { "logOff",           new[] { "(desativado)",      "(disabled)" } },
+
+            // -------------------------------------------- eventos de janela
+            { "bannerWindows",    new[] { "janelas",  "windows" } },
+            { "bannerWindowsOn",  new[] { "ligado (abrir, foco, esconder, fechar)", "on (open, focus, hide, close)" } },
+            { "winOpenTitle",     new[] { "JANELA ABERTA",      "WINDOW OPENED" } },
+            { "winFocusTitle",    new[] { "JANELA EM FOCO",     "WINDOW FOCUSED" } },
+            { "winHideTitle",     new[] { "JANELA ESCONDIDA",   "WINDOW HIDDEN" } },
+            { "winCloseTitle",    new[] { "JANELA FECHADA",     "WINDOW CLOSED" } },
+            { "fOwner",           new[] { "dono",     "owner" } },
+            { "fAuthor",          new[] { "autor",    "author" } },
+            { "fConsole",         new[] { "console",  "console" } },
+            { "fDuration",        new[] { "duracao",  "duration" } },
+            { "fFocusCount",      new[] { "foco",     "focus" } },
+            { "fNoTitle",         new[] { "sem titulo", "no title" } },
+            { "fOthers",          new[] { "outros",   "others" } }
         };
 
         public static Idioma Atual { get; private set; }

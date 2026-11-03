@@ -30,16 +30,23 @@ namespace CmdWatch.Gui
         private int _evAcc, _openAcc, _callAcc;
         private readonly List<SessionRow> _rows = new List<SessionRow>();
         private readonly Dictionary<int, SessionRow> _rowByPid = new Dictionary<int, SessionRow>();
+        private readonly Dictionary<IntPtr, WindowRow> _winByHwnd = new Dictionary<IntPtr, WindowRow>();
+        private readonly List<IntPtr> _winOrder = new List<IntPtr>();
         private readonly Queue<double> _eventsPerSec = new Queue<double>();
         private readonly Queue<double> _opensPerSec = new Queue<double>();
         private readonly List<StreamEntry> _entries = new List<StreamEntry>();
         private int _selectedPid;
 
+        // observador de janelas
+        private WindowWatcher _janelas;
+        private int _totalWindows;
+
         // controles
-        private NeonPanel _pSessions, _pStream, _pActivity;
+        private NeonPanel _pSessions, _pStream, _pActivity, _pWindows;
         private SessionTable _sessions;
         private NeonFlow _stream;
         private LineChart _activity;
+        private WindowTable _windows;
         private NeonCheckBox _checkTray;
         private NeonToggle _lang;
         private NotifyIcon _tray;
@@ -78,7 +85,7 @@ namespace CmdWatch.Gui
             _tick.Start();
 
             _slow = new System.Windows.Forms.Timer();
-            _slow.Interval = 700;
+            _slow.Interval = 1000;
             _slow.Tick += OnSlowTick;
             _slow.Start();
         }
@@ -89,6 +96,7 @@ namespace CmdWatch.Gui
             _pSessions = new NeonPanel { Title = Lang.T("sessions"), Accent = Theme.Cyan };
             _pStream = new NeonPanel { Title = Lang.T("flow"), Accent = Theme.Cyan };
             _pActivity = new NeonPanel { Title = Lang.T("activity"), Accent = Theme.Cyan };
+            _pWindows = new NeonPanel { Title = Lang.T("windows"), Accent = Theme.Amber };
 
             _sessions = new SessionTable();
             _sessions.SelectionChanged += OnSelectionChanged;
@@ -100,6 +108,9 @@ namespace CmdWatch.Gui
 
             _activity = new LineChart { LabelA = Lang.T("cmdPerSec"), LabelB = Lang.T("sessPerSec"), Capacity = 60 };
             _pActivity.Controls.Add(_activity);
+
+            _windows = new WindowTable();
+            _pWindows.Controls.Add(_windows);
 
             _checkTray = new NeonCheckBox
             {
@@ -121,6 +132,7 @@ namespace CmdWatch.Gui
             Controls.Add(_pSessions);
             Controls.Add(_pStream);
             Controls.Add(_pActivity);
+            Controls.Add(_pWindows);
             Controls.Add(_checkTray);
             Controls.Add(_lang);
 
@@ -135,22 +147,32 @@ namespace CmdWatch.Gui
             int w = ClientSize.Width, h = ClientSize.Height;
             int bottom = h - pad - HintH;
 
-            int sessH = (int)((bottom - pad) * 0.30);
+            // tres faixas: sessoes (tabela), janelas visiveis (tabela) e o
+            // fluxo com o grafico. As duas tabelas ficam com a largura toda:
+            // sao colunas de verdade, e estreitar corta o titulo da janela.
+            int totalH = bottom - pad * 2;
+            int sessH = (int)(totalH * 0.30);
             if (sessH < 132) sessH = 132;
-            if (sessH > bottom - pad - 150) sessH = bottom - pad - 150;
-
-            int sessY = pad;
-            int midY = sessY + sessH + pad;
-            int midH = bottom - midY;
+            int winH = (int)(totalH * 0.26);
+            if (winH < 120) winH = 120;
+            int midH = totalH - sessH - winH - pad * 2;
             if (midH < 160) midH = 160;
 
+            int sessY = pad;
+            int winY = sessY + sessH + pad;
+            int midY = winY + winH + pad;
+
             _pSessions.SetBounds(pad, sessY, w - pad * 2, sessH);
+            _pWindows.SetBounds(pad, winY, w - pad * 2, winH);
 
             // o fluxo usa o formato do CLI (linhas longas, sem quebra): ganha
-            // mais largura e o grafico de atividade se ajusta no resto
+            // mais largura e o grafico de atividade fica na coluna da direita
             int flowW = (int)((w - pad * 3) * 0.70);
             _pStream.SetBounds(pad, midY, flowW, midH);
-            _pActivity.SetBounds(pad + flowW + pad, midY, Math.Max(240, w - pad * 3 - flowW), midH);
+
+            int colX = pad + flowW + pad;
+            int colW = Math.Max(240, w - pad * 3 - flowW);
+            _pActivity.SetBounds(colX, midY, colW, midH);
 
             _checkTray.SetBounds(pad + 2, h - pad - HintH + 4, CheckboxWidth(), 24);
             _lang.SetBounds(w - pad - LangW - 2, h - pad - HintH + 4, LangW, 24);
@@ -161,6 +183,8 @@ namespace CmdWatch.Gui
             _stream.SetBounds(ta.X, ta.Y, ta.Width, ta.Height);
             Rectangle aa = _pActivity.PlotArea;
             _activity.SetBounds(aa.X, aa.Y, aa.Width, aa.Height);
+            Rectangle wa = _pWindows.PlotArea;
+            _windows.SetBounds(wa.X, wa.Y, wa.Width, wa.Height);
         }
 
         protected override void OnResize(EventArgs e)
@@ -265,6 +289,24 @@ namespace CmdWatch.Gui
             if (engine == "auto") engine = Program.IsAdmin() ? "wmi" : "polling";
             _engineName = engine;
             _engine = engine == "wmi" ? (IEngine)new WmiEngine() : new PollingEngine(_opts.Interval);
+
+            // observador de janelas: cada janela que abre vira um evento e
+            // acorda o motor de processos na hora
+            if (!_opts.NoWindows)
+            {
+                _janelas = new WindowWatcher { Processos = _watcher };
+                _janelas.AoDescobrirProcesso = _watcher.Despertar;
+                _janelas.OnChanged = OnWindowChanged;
+                _janelas.Start();
+            }
+
+            if (_engine is PollingEngine)
+            {
+                var pe = (PollingEngine)_engine;
+                pe.Wake = _janelas != null ? _janelas.Wake : null;
+                pe.NeedsDetail = _watcher.PrecisaDetalhes;
+                pe.IntervalProvider = _watcher.IntervaloAtual;
+            }
             _engine.Start(p => _watcher.OnProcessStart(p), pid => _watcher.OnProcessExit(pid));
 
             if (_opts.LogPath.Length > 0)
@@ -287,6 +329,7 @@ namespace CmdWatch.Gui
             info.Filter = _opts.Filter;
             info.LogPath = _opts.LogPath;
             info.IsGui = true;
+            info.Janelas = _janelas != null;
             AppendBanner(info);
         }
 
@@ -295,6 +338,7 @@ namespace CmdWatch.Gui
             try { if (_tick != null) _tick.Stop(); } catch { }
             try { if (_slow != null) _slow.Stop(); } catch { }
             try { if (_engine != null) { _engine.Stop(); _engine.Dispose(); } } catch { }
+            try { if (_janelas != null) { _janelas.OnChanged = null; _janelas.Stop(); } } catch { }
             try { if (_log != null) { _log.Flush(); _log.Close(); _log = null; } } catch { }
             try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; } } catch { }
             try { if (_ctxMenu != null) { _ctxMenu.Dispose(); } } catch { }
@@ -422,6 +466,7 @@ namespace CmdWatch.Gui
             _pSessions.Title = Lang.T("sessions");
             _pStream.Title = Lang.T("flow");
             _pActivity.Title = Lang.T("activity");
+            _pWindows.Title = Lang.T("windows");
 
             _checkTray.Label = Lang.T("trayCheck");
             _activity.LabelA = Lang.T("cmdPerSec");
@@ -435,10 +480,12 @@ namespace CmdWatch.Gui
             _pSessions.Invalidate();
             _pStream.Invalidate();
             _pActivity.Invalidate();
+            _pWindows.Invalidate();
             _activity.Invalidate();
             _checkTray.Invalidate();
             _lang.Invalidate();
             _sessions.Invalidate();
+            _windows.Invalidate();
 
             // o texto do checkbox muda de idioma: refaz o rodape
             LayoutDashboard();
@@ -565,7 +612,86 @@ namespace CmdWatch.Gui
                 case "batch_close":
                     CloseRow(ev.Session);
                     break;
+                case "window_open":
+                    _totalWindows++;
+                    ApplyWindow(ev.Window);
+                    break;
+                case "window_update":
+                case "window_focus":
+                case "window_hide":
+                case "window_close":
+                    ApplyWindow(ev.Window);
+                    break;
             }
+        }
+
+        // ------------------------------------------------------- janelas
+        /// <summary>
+        /// Uma janela mudou (abriu, ganhou foco, escondeu, fechou). O evento
+        /// entra pelo mesmo caminho dos outros: o log e o fluxo do painel falam
+        /// a mesma lingua que a saida do CLI.
+        /// </summary>
+        private void OnWindowChanged(WindowRecord rec, string tipo)
+        {
+            try
+            {
+                if (rec == null) return;
+                _watcher.OnEvent(new WatchEvent
+                {
+                    Type = "window_" + tipo,
+                    Timestamp = DateTime.Now,
+                    Window = rec,
+                    Message = tipo
+                });
+            }
+            catch { }
+        }
+
+        /// <summary>Atualiza a linha da janela na tabela.</summary>
+        private void ApplyWindow(WindowRecord rec)
+        {
+            if (rec == null) return;
+            try
+            {
+                WindowRow r;
+                if (!_winByHwnd.TryGetValue(rec.Hwnd, out r))
+                {
+                    r = new WindowRow();
+                    r.Hwnd = rec.Hwnd;
+                    r.StartedAt = rec.FirstSeen;
+                    _winByHwnd[rec.Hwnd] = r;
+                    _winOrder.Add(rec.Hwnd);
+                }
+                r.Title = rec.Title;
+                r.Author = (rec.AuthorName.Length > 0 ? rec.AuthorName : "?") + " (" + rec.AuthorPid + ")";
+                r.CmdLine = rec.AuthorCmdLine;
+                r.StartedAt = rec.FirstSeen;
+                r.Focus = rec.FocusCount;
+                r.Visible = rec.Visible;
+                r.Closed = rec.Fechada;
+                r.ClosedAt = rec.ClosedAt;
+                r.ByConsole = rec.AutorPeloConsole;
+
+                // descarta as janelas fechadas mais antigas (a tabela nao cresce
+                // para sempre)
+                if (_winOrder.Count > 200)
+                {
+                    int removidas = 0;
+                    for (int i = 0; i < _winOrder.Count && removidas < 40; i++)
+                    {
+                        IntPtr h = _winOrder[i];
+                        WindowRow velho;
+                        if (_winByHwnd.TryGetValue(h, out velho) && velho.Closed)
+                        {
+                            _winByHwnd.Remove(h);
+                            _winOrder.RemoveAt(i);
+                            i--;
+                            removidas++;
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void AddRow(BatchSession s)
@@ -699,6 +825,22 @@ namespace CmdWatch.Gui
                 _pSessions.Invalidate();
                 _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
                 _pActivity.Invalidate();
+
+                // a tabela de janelas: duracao correndo e estado atual
+                var winRows = new List<WindowRow>();
+                foreach (IntPtr h in _winOrder)
+                {
+                    WindowRow r;
+                    if (!_winByHwnd.TryGetValue(h, out r)) continue;
+                    winRows.Add(r);
+                }
+                _windows.Rows = winRows.OrderByDescending(r => r.StartedAt).ToList();
+                _windows.Invalidate();
+
+                int visiveis = 0;
+                foreach (WindowRow r in _windows.Rows) if (!r.Closed && r.Visible) visiveis++;
+                _pWindows.TitleValue = visiveis + " " + Lang.T("windowsShort");
+                _pWindows.Invalidate();
             }
             catch { }
         }

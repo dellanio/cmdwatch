@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.0.10";
+        internal const string Version = "1.1.0";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -71,13 +71,19 @@ uso:
 
 opcoes do monitor (tambem valem para o gui):
   --log <arquivo>     arquivo JSONL de saida (padrao: cmdwatch-log.jsonl)
-  --interval <ms>     intervalo de amostragem (padrao 50)
+  --interval <ms>     intervalo de amostragem parado (padrao 500)
+  --fast-interval <ms>  intervalo com script ativo (padrao 50)
   --engine <auto|polling|wmi>  motor de captura (auto detecta)
   --duration <seg>    encerra apos N segundos (0 = infinito)
   --filter <texto>    so reporta .cmd cujo caminho contenha o texto
   --no-children       nao reporta os comandos internos do script
+  --no-windows        so scripts: nao observa as janelas da tela
   --json              saida em JSONL no stdout
   --quiet             nao escreve o log em arquivo
+
+o monitor tambem observa as JANELAS: cada janela que abre, ganha foco ou
+fecha vira um evento (window_open / window_focus / window_hide / window_close),
+com a duracao e o autor - quem esta por tras da janela, perguntando ao console.
 
 opcoes do analyze:
   --json              saida em JSON
@@ -109,6 +115,8 @@ opcoes do trace:
             else eng = new PollingEngine(o.Interval);
 
             var watcher = new Watcher { Filter = o.Filter, TrackChildren = o.NoChildren == false, Verbose = o.Verbose };
+            watcher.IntervaloLentoMs = o.Interval;
+            watcher.IntervaloRapidoMs = o.FastInterval > 0 ? o.FastInterval : 50;
             StreamWriter log = null;
 
             if (!o.Quiet && o.LogPath != null)
@@ -131,24 +139,50 @@ opcoes do trace:
                 else RenderHuman(ev);
             };
 
-            // semeia a tabela de processos para resolver quem chamou os .cmd ja existentes
-            watcher.Seed();
-
-            // cabecalho: o mesmo formato usado no painel grafico
+            // cabecalho: o mesmo formato usado no painel grafico (vem antes
+            // dos eventos, para o log comecar pelo cabecalho)
             RunInfo info = new RunInfo();
             info.Version = Version;
             info.Engine = engine;
             info.IntervalMs = o.Interval;
             info.Filter = o.Filter;
             info.LogPath = (log == null) ? "" : o.LogPath;
+            info.Janelas = !o.NoWindows;
             foreach (HumanLine hl in HumanFormat.Banner(info))
                 Console.WriteLine(hl.Text);
             Console.WriteLine();
 
+            // semeia a tabela de processos para resolver quem chamou os .cmd ja existentes
+            watcher.Seed();
+
+            // observador de janelas: cada janela que abre, ganha foco ou fecha
+            // vira um evento do mesmo fluxo (e acorda o motor de processos)
+            WindowWatcher janelas = null;
+            if (!o.NoWindows)
+            {
+                janelas = new WindowWatcher { Processos = watcher };
+                janelas.AoDescobrirProcesso = watcher.Despertar;
+                janelas.OnChanged = delegate (WindowRecord rec, string tipo)
+                {
+                    watcher.OnEvent(new WatchEvent
+                    {
+                        Type = "window_" + tipo,
+                        Timestamp = DateTime.Now,
+                        Window = rec,
+                        Message = tipo
+                    });
+                };
+                janelas.Start();
+            }
+
             if (engine == "polling")
             {
                 PollingEngine.Verbose = o.Verbose;
+                PollingEngine.Timing = Environment.GetEnvironmentVariable("CMDATCH_TIMING") == "1";
                 var pe = (PollingEngine)eng;
+                pe.Wake = janelas != null ? janelas.Wake : null;
+                pe.NeedsDetail = watcher.PrecisaDetalhes;
+                pe.IntervalProvider = watcher.IntervaloAtual;
                 pe.Start(watcher.OnProcessStart, watcher.OnProcessExit);
             }
             else
@@ -165,6 +199,7 @@ opcoes do trace:
             catch { }
 
             eng.Stop();
+            try { if (janelas != null) janelas.Stop(); } catch { }
             if (log != null) { try { log.Flush(); log.Dispose(); } catch { } }
             Console.WriteLine();
             Console.WriteLine("encerrado. sessoes observadas: " + watcher.TotalSessions);
@@ -460,6 +495,28 @@ opcoes do trace:
             {
                 sb.Append(",\"step\":{\"line\":" + J.Num(ev.Step.Line) + ",\"raw\":" + J.Str(ev.Step.Raw) + ",\"meaning\":" + J.Str(ev.Step.Meaning) + "}");
             }
+            if (ev.Window != null)
+            {
+                WindowRecord w = ev.Window;
+                sb.Append(",\"window\":{");
+                sb.Append("\"hwnd\":" + J.Str("0x" + w.Hwnd.ToInt64().ToString("X")) + ",");
+                sb.Append("\"title\":" + J.Str(w.Title) + ",");
+                sb.Append("\"class\":" + J.Str(w.ClassName) + ",");
+                sb.Append("\"ownerPid\":" + J.Num(w.OwnerPid) + ",");
+                sb.Append("\"owner\":" + J.Str(w.OwnerName) + ",");
+                sb.Append("\"ownerCmdLine\":" + J.Str(w.OwnerCmdLine) + ",");
+                sb.Append("\"authorPid\":" + J.Num(w.AuthorPid) + ",");
+                sb.Append("\"author\":" + J.Str(w.AuthorName) + ",");
+                sb.Append("\"authorCmdLine\":" + J.Str(w.AuthorCmdLine) + ",");
+                sb.Append("\"byConsole\":" + (w.AutorPeloConsole ? "true" : "false") + ",");
+                sb.Append("\"consoleClients\":" + J.Num(w.ConsoleClients.Count) + ",");
+                sb.Append("\"firstSeen\":" + J.Ts(w.FirstSeen) + ",");
+                sb.Append("\"durationMs\":" + J.Num((long)(w.DuracaoSeg * 1000)) + ",");
+                sb.Append("\"focusCount\":" + J.Num(w.FocusCount) + ",");
+                sb.Append("\"visible\":" + (w.Visible ? "true" : "false") + ",");
+                sb.Append("\"closed\":" + (w.Fechada ? "true" : "false"));
+                sb.Append("}");
+            }
             sb.Append("}");
             return sb.ToString();
         }
@@ -468,8 +525,10 @@ opcoes do trace:
     internal sealed class Options
     {
         public string LogPath = "cmdwatch-log.jsonl";
-        public int Interval = 50;
+        public int Interval = 500;
+        public int FastInterval = 50;
         public string Engine = "auto";
+        public bool NoWindows;
         public int Duration = 0;
         public string Filter = "";
         public bool NoChildren = false;
@@ -489,10 +548,12 @@ opcoes do trace:
                 {
                     case "--log": if (i + 1 < argv.Length) o.LogPath = argv[++i]; break;
                     case "--interval": if (i + 1 < argv.Length) int.TryParse(argv[++i], out o.Interval); break;
+                    case "--fast-interval": if (i + 1 < argv.Length) int.TryParse(argv[++i], out o.FastInterval); break;
                     case "--engine": if (i + 1 < argv.Length) o.Engine = argv[++i].ToLowerInvariant(); break;
                     case "--duration": if (i + 1 < argv.Length) int.TryParse(argv[++i], out o.Duration); break;
                     case "--filter": if (i + 1 < argv.Length) o.Filter = argv[++i]; break;
                     case "--no-children": o.NoChildren = true; break;
+                    case "--no-windows": o.NoWindows = true; break;
                     case "--json": o.Json = true; break;
                     case "--quiet": o.Quiet = true; break;
                     case "--verbose": o.Verbose = true; break;
@@ -502,6 +563,7 @@ opcoes do trace:
                 }
             }
             if (o.Interval < 50) o.Interval = 50;
+            if (o.Interval > 5000) o.Interval = 5000;
             return o;
         }
     }
