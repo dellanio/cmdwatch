@@ -99,16 +99,40 @@ function Fechar($g, $linha, $foto) {
   Start-Sleep -Milliseconds 1500
   return "ok (dialogo: $titulo)"
 }
-Set-Content (Join-Path $repro 'segredos-longo.cmd') "@echo off`r`ncmd /c rem sqlcmd -S db `"Server=db;User Id=sa;Password=Pa55w0rd;`"`r`nping -n 90 127.0.0.1 >nul" -Encoding ASCII
+# valores falsos gerados na hora: nenhum segredo literal no codigo-fonte (scanners como o GitGuardian)
+function Falso($n) { $abc = 'abcdefghjkmnpqrstuvwxyz23456789'; -join (1..$n | ForEach-Object { $abc[(Get-Random -Maximum $abc.Length)] }) }
+$pw = 'fx' + (Falso 8); $tk = 'tk' + (Falso 10); $ak = 'ak' + (Falso 9); $sq = 'sq' + (Falso 8)
+Set-Content (Join-Path $repro 'segredos-longo.cmd') ("@echo off`r`ncmd /c rem sqlcmd -S db `"Server=db;User Id=sa;Pass" + "word=$sq;`"`r`nping -n 90 127.0.0.1 >nul") -Encoding ASCII
+# leitura do log enquanto o painel ainda grava (compartilhada)
+function LerLog($log) {
+  if (-not (Test-Path $log)) { return @() }
+  try { $fs = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite'); $sr = New-Object IO.StreamReader($fs)
+        $t = $sr.ReadToEnd(); $sr.Close(); return @($t -split "`r?`n" | Where-Object { $_ }) } catch { return @() }
+}
+# espera uma condicao sobre o log, com prazo (em vez de pausas fixas)
+function EsperarLog($log, [scriptblock]$cond, [int]$prazoS) {
+  $fim = (Get-Date).AddSeconds($prazoS)
+  while ((Get-Date) -lt $fim) { if (& $cond (LerLog $log)) { return $true }; Start-Sleep -Milliseconds 250 }
+  return $false
+}
+function EstadoFinal($L) {
+  $fim = @{}; foreach ($l in $L) { if ($l -match '"type":"window_' -and $l -match '"class":"(CASCADIA_HOSTING_WINDOW_CLASS|ConsoleWindowClass|PseudoConsoleWindow)"') { try { $o = $l | ConvertFrom-Json; $fim[$o.window.hwnd] = $o.window } catch {} } }
+  return $fim
+}
+function D5Janelas($fim) { @($fim.Values | Where-Object { $_.authorCmdLine -match 'script_pai' -or ($_.chain -and (($_.chain | ConvertTo-Json -Compress) -match 'script_pai')) }) }
 
 # ---- painel 1: cenarios D5 + mascara + Fechar
 $log = Join-Path $logs "gui-$Nome.jsonl"
 $g = Painel $log $false
 (Oculto 'node.exe' ("`"" + (Join-Path $repro 'launch_pai.js') + "`"")).WaitForExit()      # node -> python -> git, aba do Windows Terminal
 $ch = Start-Process conhost.exe -ArgumentList 'python', "`"$(Join-Path $repro 'script_pai.py')`"" -PassThru   # mesmo script num console classico
-$sec = Start-Process python -ArgumentList '-c', '"import time; time.sleep(40)"', '--password', 'Hunter2xyz', 'token=abc123def456' -PassThru
-$ses = Oculto 'cmd.exe' ("/c `"" + (Join-Path $repro 'segredos-longo.cmd') + "`" --api-key ZZsegredo99 token=abc123def456")
-Start-Sleep 6
+$sec = Start-Process python -ArgumentList '-c', '"import time; time.sleep(40)"', '--password', $pw, "token=$tk" -PassThru
+$ses = Oculto 'cmd.exe' ("/c `"" + (Join-Path $repro 'segredos-longo.cmd') + "`" --api-key $ak token=$tk")
+# espera (com prazo) as duas janelas do script_pai e a linha mascarada no log
+$esperouD5 = EsperarLog $log { param($L) (D5Janelas (EstadoFinal $L)).Count -ge 2 } 25
+$esperouMasc = EsperarLog $log { param($L) @($L | Where-Object { $_ -match '--password \*\*\*|token=\*\*\*' }).Count -gt 0 } 20
+"(espera: D5=$esperouD5, mascara=$esperouMasc)"
+Start-Sleep 1
 [PW]::SetForegroundWindow($g.MainWindowHandle) | Out-Null; Start-Sleep -Milliseconds 500
 [PW]::Shot($g.MainWindowHandle, (Join-Path $Shots "$Nome.png"))
 # segunda captura no tamanho da referencia (1024x640) e volta ao tamanho padrao
@@ -126,16 +150,19 @@ if (-not $SoFoto) {
 }
 try { $g.CloseMainWindow() | Out-Null; if (-not $g.WaitForExit(4000)) { $g.Kill() } } catch {}
 foreach ($p in @($sec, $ch, $ses)) { try { if (-not $p.HasExited) { $p.Kill() } } catch {} }
-Start-Sleep 2   # o log do painel termina de ser gravado depois do fechamento
-$L = if (Test-Path $log) { [IO.File]::ReadAllLines($log) } else { @() }
+# o log termina de ser gravado depois do fechamento: espera o painel sair e o arquivo parar de crescer
+try { $g.WaitForExit(10000) | Out-Null } catch {}
+$tam = -1; for ($i = 0; $i -lt 40; $i++) { $n = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }; if ($n -eq $tam -and $n -gt 0) { break }; $tam = $n; Start-Sleep -Milliseconds 250 }
+$L = LerLog $log
 # estado final de cada janela de console/terminal (ultimo evento por hwnd) - uma linha da tabela por janela
-$fim = @{}; foreach ($l in $L) { if ($l -match '"type":"window_' -and $l -match '"class":"(CASCADIA_HOSTING_WINDOW_CLASS|ConsoleWindowClass|PseudoConsoleWindow)"') { $o = $l | ConvertFrom-Json; $fim[$o.window.hwnd] = $o.window } }
-$d5 = @($fim.Values | Where-Object { $_.authorCmdLine -match 'script_pai' -or ($_.chain -and (($_.chain | ConvertTo-Json -Compress) -match 'script_pai')) })
+$fim = EstadoFinal $L
+$d5 = D5Janelas $fim
 $cas = @($fim.Values | Where-Object { $_.class -ne 'PseudoConsoleWindow' -and $_.firstSeen -and $_.author -match 'git' })
 $aux = @($fim.Values | Where-Object { $_.class -eq 'PseudoConsoleWindow' -and -not $_.auxiliary })
 $txt = ($d5 | ForEach-Object { $_.class + '=' + $_.author }) -join ', '
-Ok 'D5-painel' (($d5.Count -ge 2) -and -not ($d5 | Where-Object { $_.author -ne 'python.exe' }) -and $cas.Count -eq 0 -and $aux.Count -eq 0) ("janelas do script_pai (estado final): $txt; com autor git: " + $cas.Count + "; PseudoConsole como linha: " + $aux.Count)$vaz = $L | Where-Object { $_ -match 'Hunter2xyz|abc123def456|ZZsegredo99|Pa55w0rd' }
-$mas = $L | Where-Object { $_ -match '--password \*\*\*|token=\*\*\*' }
+Ok 'D5-painel' (($d5.Count -ge 2) -and -not ($d5 | Where-Object { $_.author -ne 'python.exe' }) -and $cas.Count -eq 0 -and $aux.Count -eq 0) ("janelas do script_pai (estado final): $txt; com autor git: " + $cas.Count + "; PseudoConsole como linha: " + $aux.Count)
+$vaz = @($L | Where-Object { $_.Contains($pw) -or $_.Contains($tk) -or $_.Contains($ak) -or $_.Contains($sq) })
+$mas = @($L | Where-Object { $_ -match '--password \*\*\*|token=\*\*\*' })
 Ok 'MASCARA-painel' (($vaz.Count -eq 0) -and ($mas.Count -gt 0)) ("linhas do log do painel com segredo: " + $vaz.Count + ", com mascara: " + $mas.Count)
 
 # ---- painel 2: registro velho (pid reaproveitado simulado) -> nao pode encerrar

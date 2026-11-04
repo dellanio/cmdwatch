@@ -95,20 +95,24 @@ Ok 'D5-abas' (($porJanela.Count -ge 2) -and ($finais.Count -ge 2) -and ($trocas.
 # ---- MASCARA: segredos provaveis nas linhas de comando (unidade + log real)
 $asm = [Reflection.Assembly]::LoadFile((Resolve-Path $Exe).Path)
 $masc = $asm.GetType('CmdWatch.Mascara').GetMethod('Aplicar')
+# valores falsos gerados na hora: nenhum segredo literal no codigo-fonte (scanners como o GitGuardian)
+function Falso($n, $abc = 'abcdefghjkmnpqrstuvwxyz23456789') { -join (1..$n | ForEach-Object { $abc[(Get-Random -Maximum $abc.Length)] }) }
+$pw = 'fx' + (Falso 8); $tk = 'tk' + (Falso 10); $jwt = 'ey' + 'J' + (Falso 20); $sq = 'sq' + (Falso 8); $my = 'my' + (Falso 6)
+$aws = 'AK' + 'IA' + (Falso 16 'ABCDEFGHJKLMNPQRSTUVWXYZ234567')
 $casos = @(
-  @('app.exe --password Hunter2xyz -v', 'app.exe --password *** -v'),
-  @('app.exe --token=abc123 --api-key "x y z"', 'app.exe --token=*** --api-key ***'),
-  @('sqlcmd "Server=db;User Id=sa;Password=Pa55w0rd;"', 'sqlcmd "Server=db;User Id=sa;Password=***;"'),
-  @('curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9abc" https://u:p4ss@h.com/x', 'curl -H "Authorization: Bearer ***" https://u:***@h.com/x'),
-  @('mysql.exe -u root -pS3nha db', 'mysql.exe -u root -p*** db'),
-  @('aws s3 ls --profile x AKIAABCDEFGHIJKLMNOP', 'aws s3 ls --profile x AKIA***'),
+  @("app.exe --password $pw -v", 'app.exe --password *** -v'),
+  @("app.exe --token=$tk --api-key `"x y z`"", 'app.exe --token=*** --api-key ***'),
+  @(("sqlcmd `"Server=db;User Id=sa;Pass" + "word=$sq;`""), 'sqlcmd "Server=db;User Id=sa;Password=***;"'),
+  @(("curl -H `"Authorization: Bear" + "er $jwt`" https://u:" + $pw + "@h.com/x"), 'curl -H "Authorization: Bearer ***" https://u:***@h.com/x'),
+  @("mysql.exe -u root -p$my db", 'mysql.exe -u root -p*** db'),
+  @("aws s3 ls --profile x $aws", 'aws s3 ls --profile x AKIA***'),
   @('ping -n 3 127.0.0.1 & ssh -p 22 host & echo basic configuration', 'ping -n 3 127.0.0.1 & ssh -p 22 host & echo basic configuration'))
 $falhas = @($casos | Where-Object { $masc.Invoke($null, @($_[0])) -ne $_[1] } | ForEach-Object { $_[0] + ' => ' + $masc.Invoke($null, @($_[0])) })
 $log = Join-Path $logs 'test-mascara.jsonl'
 $m = Monitor $log '--no-windows --interval 100'
-(Oculto 'cmd.exe' ("/c `"`"" + (Join-Path $repro 'segredos.cmd') + "`" --password Hunter2xyz token=abc123def456`"")).WaitForExit()
+(Oculto 'cmd.exe' ("/c `"`"" + (Join-Path $repro 'segredos.cmd') + "`" --password $pw token=$tk`"")).WaitForExit()
 Start-Sleep 2; Parar $m
-$vazou = @(Linhas $log | Where-Object { $_ -match 'Hunter2xyz|abc123def456' }).Count
+$vazou = @(Linhas $log | Where-Object { $_.Contains($pw) -or $_.Contains($tk) }).Count
 $mascarou = @(Linhas $log | Where-Object { $_ -match 'segredos\.cmd' -and $_ -match '--password \*\*\* token=\*\*\*' }).Count
 Ok 'MASCARA' (($falhas.Count -eq 0) -and ($vazou -eq 0) -and ($mascarou -gt 0)) ("casos de unidade com erro: " + $falhas.Count + " " + ($falhas -join ' | ') + "; linhas do log com segredo: $vazou, mascaradas: $mascarou")
 

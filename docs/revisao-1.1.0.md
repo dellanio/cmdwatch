@@ -309,7 +309,7 @@ commit-v111.txt, release-notes-1.1.1.md, release-notes-1.1.0-corrigida.md, valid
 - **Não validado:** o caminho do painel (ConsoleProbe) para o D5 não foi rodado nesta rodada; a troca de autor entre abas não foi reproduzida no build antigo (ele falhava antes, por não resolver o autor), então a correção da corrida é validada só pelo teste novo passando.
 
 ### Segredos nos logs
-- **Antes (build antigo, log real):** `batch_open args: --password Hunter2xyz token=abc123def456 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9abc https://user:p4ssw0rd@example.com AKIAABCDEFGHIJKLMNOP`.
+- **Antes (build antigo, log real):** os valores apareciam em claro: `batch_open args: --password <senha> token=<token> Authorization: Bearer <token> usuário:<senha>@example.com AKIA<16 caracteres>` (aqui com marcadores no lugar dos valores falsos do teste).
 - **Correção:** `src/Mascara.cs` (novo) — regras conservadoras (`--password/--token/--api-key/--secret…`, `password=/pwd=/token=/apikey=` incl. string de conexão, `Authorization: Bearer|Basic`/`Bearer`, `usuário:senha@` em URL, chave AWS `AKIA/ASIA`, `-pSENHA` do mysql/mariadb). Aplicada em todo `cmdLine`, `args`, `raw`, `title` do JSONL (`Program.cs`), na saída humana (`HumanFormat.cs`), no `--verbose` (`Monitor.cs`) e na tabela do painel (`DashboardForm.cs`). Opção `--no-mask` desliga. README: seção "Segredos nas linhas de comando (máscara)" + linha na tabela de opções.
 - **Depois:** `batch_open args: --password *** token=*** Authorization: Bearer *** https://user:***@example.com AKIA***`; `batch_step processo: cmd /c rem sqlcmd -S db "Server=db;User Id=sa;Password=***;"`. Teste `MASCARA`: 7 casos de unidade (incl. negativos `ssh -p 22` e "basic configuration" intactos) + log real: 0 linhas com segredo, 5 mascaradas.
 - **Limites:** `-p` de outros programas, senha posicional sem nome e variáveis de ambiente não são mascarados (de propósito). O caso `mysql -p` foi validado só na unidade (o `cmd /c rem mysql…` de ~20 ms escapou do polling).
@@ -342,7 +342,7 @@ O teste dirige o painel por mensagens Win32: clique direito na linha, o menu, "F
 - **FECHAR**: o diálogo "Encerrar o script?" apareceu, o cmd e o filho `ping` foram encerrados e a linha ficou como terminada.
 - **FECHAR-velho** (gancho `CMDWATCH_TESTE_PID_VELHO=1`): o painel recusou e o processo continuou vivo.
 - **D5-painel**: a janela Cascadia (WT) e a ConsoleWindowClass ficaram com autor `python.exe`, sem autor git e sem linha PseudoConsole.
-- **MASCARA-painel**: antes, o fluxo do painel mostrava `Password=Pa55w0rd` (ver `painel-antes.png`). Corrigido em `HumanFormat.cs`, onde a máscara agora é aplicada a `Raw`/`Meaning`. Depois: 0 linhas com segredo no log e `Password=***` visível no fluxo.
+- **MASCARA-painel**: antes, o fluxo do painel mostrava `Password=<senha>` em claro (ver `painel-antes.png`). Corrigido em `HumanFormat.cs`, onde a máscara agora é aplicada a `Raw`/`Meaning`. Depois: 0 linhas com segredo no log e `Password=***` visível no fluxo.
 
 ### Visual
 O tema escuro é o padrão:
@@ -379,3 +379,36 @@ Cerca de +1 ponto. A diferença minimizada também aparece, embora o painel mini
 - Testes: test-painel (FECHAR, MASCARA-painel, FECHAR-velho PASSOU; D5-painel falhou 1 de 3 execuções com autor git.exe na janela do WT, problema intermitente do motor já conhecido, não tocado) e test-defeitos (todos PASSOU).
 - CPU visível: 5,7% parado / 18,9% rajada (antes 7,3 / 17,6%).
 - Capturas: docs\screens\painel-v2.png (1440x880) e painel-v2-1024.png.
+
+## Rodada 6 - adendo (04/11/2026, ~03:00-03:45 BRT)
+
+### Entregue no push anterior
+- Engrenagem do topo removida (Configurações só na barra lateral); Pausar e busca alinhados à direita.
+- Vazamento real corrigido: o campo `meaning` (JSONL de analyze/trace/batch_step e console) saía sem máscara; agora passa por `Mascara.Aplicar`.
+- `tools/captura-readme.ps1`: gera `docs/dashboard.png`, `docs/menu-contexto.png` e `docs/confirmacao.png` com dados de exemplo seguros; só encerra o que iniciou.
+- Push para `origin/main` (fast-forward `f31af55..3db539e`): `910e2d6` (revisão 1.1.0) e `3db539e` (README bilíngue e imagens), junto com os commits locais `103bd90` e `c93c76c`.
+
+### Autor intermitente da janela do Windows Terminal
+- **Reprodução:** `tools/test-d5-repeticao.ps1` (novo) roda o cenário D5 (node -> python -> git numa janela nova do WT) 20 vezes com 3 consoles de fundo abertos (clássicos e aba do WT) e confere o autor de todos os eventos de cada janela nova.
+- **Antes:** 20/20 falhas - todo `window_open` da Cascadia saía com autor `WindowsTerminal.exe`; o autor real (`python.exe`) só aparecia no `hide`/`close`. Era isso que o fluxo do painel mostrava ("autor: WindowsTerminal.exe") enquanto a tabela, mais tarde, mostrava python.
+- **Causa:** a janela Cascadia aparece antes da PseudoConsoleWindow da aba. O `open` era emitido na hora, com o dono (o terminal) como autor; quando a Pseudo chegava, `AssociarTerminal` copiava o autor para a Cascadia sem notificar, então não havia `update` e o fluxo ficava com o autor errado.
+- **Correção (`src/WindowWatcher.cs`):** Cascadia nova cujo autor ainda é o terminal fica com o `open` segurado (`OpenPendente`) até a Pseudo ligada trazer o autor real, com prazo de 1,5 s (no prazo, tenta associar de novo e emite o que houver). Qualquer `hide`/`close`/`focus` antes disso emite o `open` primeiro. Log, fluxo e tabela usam o mesmo autor resolvido.
+- **Depois:** 0/20 falhas (todos os eventos com `python.exe`).
+
+### Testes determinísticos
+- `test-painel.ps1`: as pausas fixas antes da verificação viraram espera por condição com prazo (janelas do script_pai no log, linha mascarada no log; depois do fechamento, espera o painel sair e o arquivo parar de crescer). Leitura do log com compartilhamento.
+- Achado no próprio teste: a linha do `$vaz` estava colada no fim da chamada do D5-painel e nunca era atribuída - a checagem de vazamento do MASCARA-painel não verificava nada. Separada; agora conta de verdade.
+- Resultados: test-painel 5/5 execuções com todos PASSOU (FECHAR, D5-painel, MASCARA-painel 0 com segredo / 5-6 mascaradas, FECHAR-velho); test-defeitos 3/3 com todos PASSOU depois da correção abaixo.
+
+### Segredos falsos fora do código (alerta GitGuardian no commit 910e2d6)
+- O GitGuardian apontou 4 incidentes (Bearer Token, Generic Password, 2x Generic CLI Secret) - todos valores falsos de teste/documentação.
+- Os testes (`test-defeitos.ps1`, `test-painel.ps1`) agora geram os valores falsos na hora (aleatórios, montados em partes); a saída mascarada esperada continua a mesma. README e este documento mostram só marcadores (`<senha>`, `<token>`, `AKIA` + 16 caracteres).
+- Varredura da árvore rastreada (literais antigos, `Bearer` + token, `AKIA` + 16, `Password=<valor>`, `usuário:senha@` em URL): zero ocorrências fora das regras e comentários de `src/Mascara.cs` e das descrições de padrão.
+- O histórico (commit 910e2d6) não foi reescrito; limpeza do histórico só se pedida.
+- Na primeira execução, 2 casos de unidade do MASCARA falharam por erro do próprio teste (precedência da vírgula sobre o `+` no PowerShell juntava dois casos); corrigido com parênteses, 0 erros depois.
+
+### CPU do painel (visível)
+- Parado 5,8% de 1 núcleo (65 s) / rajada 15,6% (antes 5,7 / 18,9). Memória 40,5 MB.
+
+### Incidente: encerramento amplo
+- Numa captura anterior (rodada do README) rodei `Get-Process cmdwatch | Stop-Process -Force`, contra a regra de só encerrar processos dos próprios testes. As verificações logo antes não mostravam cmdwatch aberto, então provavelmente nada foi encerrado, mas o comando não devia ter sido usado. Nesta rodada os testes só encerram PIDs que iniciaram (ou processos com a marca única do teste na linha de comando).

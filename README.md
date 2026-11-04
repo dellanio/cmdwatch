@@ -329,12 +329,12 @@ nome do parâmetro deixa claro que é segredo.
 
 | Padrão | Antes | Depois |
 |---|---|---|
-| `--password`, `--token`, `--api-key`, `--secret`, `--client-secret`… (com espaço, `=` ou `:`) | `--password Hunter2` | `--password ***` |
-| `password=`, `pwd=`, `token=`, `apikey=`… (inclusive string de conexão) | `Password=Pa55w0rd;` | `Password=***;` |
-| `Authorization: Bearer/Basic …` ou `Bearer …` | `Bearer eyJhbG…` | `Bearer ***` |
-| usuário:senha em URL | `https://u:p4ss@host` | `https://u:***@host` |
-| chave de acesso AWS (`AKIA`/`ASIA` + 16) | `AKIAABCDEFGHIJKLMNOP` | `AKIA***` |
-| `-pSENHA` do `mysql`/`mysqldump`/`mysqladmin`/`mariadb` | `mysql -u root -pS3nha` | `mysql -u root -p***` |
+| `--password`, `--token`, `--api-key`, `--secret`, `--client-secret`… (com espaço, `=` ou `:`) | `--password <senha>` | `--password ***` |
+| `password=`, `pwd=`, `token=`, `apikey=`… (inclusive string de conexão) | `Password=<senha>;` | `Password=***;` |
+| `Authorization: Bearer/Basic …` ou `Bearer …` | `Bearer <token>` | `Bearer ***` |
+| usuário:senha em URL | `usuário:<senha>@host` | `usuário:***@host` |
+| chave de acesso AWS (`AKIA`/`ASIA` + 16) | `AKIA` + 16 caracteres | `AKIA***` |
+| `-pSENHA` do `mysql`/`mysqldump`/`mysqladmin`/`mariadb` | `mysql -u root -p<senha>` | `mysql -u root -p***` |
 
 Ficam de fora de propósito: `-p` de outros programas (`ssh -p 22` é porta), senhas
 posicionais sem nome e variáveis de ambiente. Para ver as linhas sem máscara (depuração),
@@ -399,10 +399,10 @@ Tipos de sessão: `batch_open`, `batch_step`, `batch_close`, `batch_call`. Tipos
 - **Scripts `.cmd` ocultos e curtos com a máquina parada** podem escapar do `polling` (ver
   [Motores de captura](#motores-de-captura)). Sem administrador, a captura de scripts
   ocultos mais curtos que o intervalo **não é garantida**; com administrador, use `etw`.
-- **Autor no Windows Terminal com vários consoles abertos:** de forma intermitente, a janela
-  de uma aba pode sair com o autor errado (por exemplo `git.exe`, ou
-  `OpenConsole.exe <= svchost`). Nos testes automatizados isso aconteceu em cerca de 1 de 3
-  execuções do teste do painel. É um problema conhecido do motor, ainda aberto.
+- **Autor no Windows Terminal:** a janela do terminal aparece antes do console da aba, então
+  o evento `open` espera até 1,5 s pelo autor real. Com 3 outros consoles abertos, 20
+  repetições deram 0 autores errados (`tools\test-d5-repeticao.ps1`). Se a aba não for vista
+  nesse prazo, o evento sai com o autor que houver (pode ser o próprio terminal).
 - **Linha de comando inacessível** apenas em processos protegidos (SYSTEM). Para processos
   de outro usuário, o evento é registrado sem a linha de comando.
 - **A pergunta ao console só funciona no painel.** No modo CLI o cmdwatch já está anexado a
@@ -793,12 +793,12 @@ name makes it clear that the value is a secret.
 
 | Pattern | Before | After |
 |---|---|---|
-| `--password`, `--token`, `--api-key`, `--secret`, `--client-secret`… (with space, `=` or `:`) | `--password Hunter2` | `--password ***` |
-| `password=`, `pwd=`, `token=`, `apikey=`… (including connection strings) | `Password=Pa55w0rd;` | `Password=***;` |
-| `Authorization: Bearer/Basic …` or `Bearer …` | `Bearer eyJhbG…` | `Bearer ***` |
-| user:password in a URL | `https://u:p4ss@host` | `https://u:***@host` |
-| AWS access key (`AKIA`/`ASIA` + 16) | `AKIAABCDEFGHIJKLMNOP` | `AKIA***` |
-| `-pPASSWORD` for `mysql`/`mysqldump`/`mysqladmin`/`mariadb` | `mysql -u root -pS3nha` | `mysql -u root -p***` |
+| `--password`, `--token`, `--api-key`, `--secret`, `--client-secret`… (with space, `=` or `:`) | `--password <password>` | `--password ***` |
+| `password=`, `pwd=`, `token=`, `apikey=`… (including connection strings) | `Password=<senha>;` | `Password=***;` |
+| `Authorization: Bearer/Basic …` or `Bearer …` | `Bearer <token>` | `Bearer ***` |
+| user:password in a URL | `user:<password>@host` | `user:***@host` |
+| AWS access key (`AKIA`/`ASIA` + 16) | `AKIA` + 16 characters | `AKIA***` |
+| `-pPASSWORD` for `mysql`/`mysqldump`/`mysqladmin`/`mariadb` | `mysql -u root -p<senha>` | `mysql -u root -p***` |
 
 Deliberately left out: `-p` for other programs (`ssh -p 22` is a port), unnamed positional
 passwords and environment variables. To see raw lines (debugging), use `--no-mask`.
@@ -852,10 +852,10 @@ already exited.
 - **Short hidden `.cmd` scripts on an idle machine** can slip past `polling` (see
   [Capture engines](#capture-engines)). Without administrator, capturing hidden scripts
   shorter than the interval is **not guaranteed**; with administrator, use `etw`.
-- **Author in Windows Terminal with several consoles open:** intermittently, a tab's window
-  can get the wrong author (for example `git.exe`, or `OpenConsole.exe <= svchost`). In the
-  automated tests this happened in about 1 of 3 runs of the panel test. It is a known engine
-  issue, still open.
+- **Author in Windows Terminal:** the terminal window shows up before the tab's console, so
+  the `open` event waits up to 1.5 s for the real author. With 3 other consoles open, 20
+  repetitions gave 0 wrong authors (`tools\test-d5-repeticao.ps1`). If the tab is not seen
+  within that time, the event goes out with whatever author is known (it may be the terminal).
 - **Command line unavailable** only for protected (SYSTEM) processes. For other users'
   processes the event is recorded without the command line.
 - **Asking the console only works in the panel.** In CLI mode cmdwatch is already attached

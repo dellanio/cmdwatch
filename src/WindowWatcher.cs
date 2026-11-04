@@ -52,6 +52,12 @@ namespace CmdWatch
         public bool Auxiliar;
         /// <summary>Hwnd da janela Cascadia a que esta PseudoConsole esta ligada.</summary>
         public IntPtr LinkedHwnd = IntPtr.Zero;
+        /// <summary>
+        /// Cascadia aberta antes da PseudoConsole: o "open" fica segurado ate o
+        /// autor real chegar (ou ate o prazo), para o log e o fluxo nao mostrarem
+        /// WindowsTerminal.exe como autor.
+        /// </summary>
+        public bool OpenPendente;
 
         public bool Fechada { get { return ClosedAt.HasValue; } }
 
@@ -488,8 +494,19 @@ namespace CmdWatch
                     return;
                 }
 
-                if (novo) Notificar(rec, "open");
-                else if (mudou || autorAntes != rec.AuthorPid) Notificar(rec, "update");
+                if (novo)
+                {
+                    // Windows Terminal: a Cascadia aparece antes da PseudoConsole da
+                    // aba, e nesse instante o "autor" ainda e o proprio terminal.
+                    // Segura o open ate a Pseudo trazer o autor real (ou 1,5 s).
+                    if (rec.ClassName == "CASCADIA_HOSTING_WINDOW_CLASS" && EhTerminalHost(rec.AuthorName))
+                    {
+                        rec.OpenPendente = true;
+                        ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(1500); LiberarOpen(rec); });
+                    }
+                    else Notificar(rec, "open");
+                }
+                else if (!rec.OpenPendente && (mudou || autorAntes != rec.AuthorPid)) Notificar(rec, "update");
             }
             catch { }
         }
@@ -1068,7 +1085,31 @@ namespace CmdWatch
                 alvo.AutorPeloConsole = true;
             }
             MontarCadeia(alvo);
-            if (mudou) Notificar(alvo, "update");
+            if (alvo.OpenPendente && !EhTerminalHost(alvo.AuthorName)) LiberarOpen(alvo);
+            else if (mudou && !alvo.OpenPendente) Notificar(alvo, "update");
+        }
+
+        /// <summary>Tira o open do estado pendente (uma unica vez).</summary>
+        private bool TomarPendente(WindowRecord rec)
+        {
+            lock (_lock)
+            {
+                if (!rec.OpenPendente) return false;
+                rec.OpenPendente = false;
+                return true;
+            }
+        }
+
+        /// <summary>Emite o open segurado, com o autor que houver agora.</summary>
+        private void LiberarOpen(WindowRecord rec)
+        {
+            try
+            {
+                if (!TomarPendente(rec)) return;
+                if (EhTerminalHost(rec.AuthorName)) { AssociarTerminal(rec); MontarCadeia(rec); }
+                if (OnChanged != null) OnChanged(rec, "open");
+            }
+            catch { }
         }
 
         private static bool EhTerminalHost(string nome)
@@ -1132,7 +1173,13 @@ namespace CmdWatch
 
         private void Notificar(WindowRecord rec, string tipo)
         {
-            try { if (OnChanged != null) OnChanged(rec, tipo); } catch { }
+            try
+            {
+                // hide/close/focus de uma janela com open segurado: o open vem antes
+                if (tipo != "open" && TomarPendente(rec) && OnChanged != null) OnChanged(rec, "open");
+                if (OnChanged != null) OnChanged(rec, tipo);
+            }
+            catch { }
         }
 
         // ------------------------------------------------------- API do Windows
