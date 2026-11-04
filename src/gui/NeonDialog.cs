@@ -35,7 +35,7 @@ namespace CmdWatch.Gui
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Theme.Bg;
+            BackColor = Theme.Panel;
             ForeColor = Theme.Text;
             KeyPreview = true;
             MinimizeBox = false;
@@ -52,7 +52,9 @@ namespace CmdWatch.Gui
 
             // [Cancelar] [Fechar] - o cancelador fica a esquerda da acao
             _okRect = new Rectangle(w - Pad - BtnW, h - Pad - BtnH, BtnW, BtnH);
-            _cancelRect = new Rectangle(_okRect.Left - 10 - BtnW, h - Pad - BtnH, BtnW, BtnH);
+            _cancelRect = _cancelText.Length > 0
+                ? new Rectangle(_okRect.Left - 10 - BtnW, h - Pad - BtnH, BtnW, BtnH)
+                : Rectangle.Empty;   // so informativo: um botao
         }
 
         /// <summary>Mostra o dialogo modal, centrado na janela proprietaria.</summary>
@@ -76,8 +78,9 @@ namespace CmdWatch.Gui
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Theme.Bg);
-            Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
+            g.Clear(Theme.Panel);
+            using (Pen p = new Pen(Theme.Border))
+                g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
 
             TextRenderer.DrawText(g, _title, Theme.UiTitle,
                 new Rectangle(Pad, Pad, Width - Pad * 2, 24), Theme.Text,
@@ -88,20 +91,20 @@ namespace CmdWatch.Gui
                 new Rectangle(Pad, msgTop, Width - Pad * 2, Height - msgTop - BtnH - Pad - 10), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
 
-            DrawButton(g, _cancelRect, _cancelText, false, _hover == 1);
+            if (!_cancelRect.IsEmpty) DrawButton(g, _cancelRect, _cancelText, false, _hover == 1);
             DrawButton(g, _okRect, _okText, true, _hover == 0);
         }
 
         private void DrawButton(Graphics g, Rectangle r, string text, bool primary, bool hover)
         {
-            Color accent = primary ? _okAccent : Theme.Border;
+            // botoes arredondados: a acao e preenchida na cor dela, o cancelar e cinza
             Color fill = primary
-                ? (hover ? Color.FromArgb(70, _okAccent) : Color.FromArgb(38, _okAccent))
-                : (hover ? Theme.Panel : Theme.PanelDeep);
-            Color cor = primary ? _okAccent : (hover ? Theme.Text : Theme.Dim);
+                ? (hover ? Theme.Darken(_okAccent, 0.08f) : _okAccent)
+                : (hover ? Theme.Darken(Theme.Fill, 0.04f) : Theme.Fill);
+            Color cor = primary ? (_okAccent == Theme.Teal ? Theme.Bg : Color.White) : Theme.Text;
 
-            Theme.DrawPanel(g, r, 4, fill, hover ? accent : Theme.Border);
-            TextRenderer.DrawText(g, text, primary ? Theme.UiBold : Theme.Ui, r, cor,
+            Theme.DrawPanel(g, r, 6, fill, primary ? Color.Empty : Theme.Border);
+            TextRenderer.DrawText(g, text, Theme.UiBold, r, cor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
 
@@ -136,6 +139,12 @@ namespace CmdWatch.Gui
             int h = HitTest(e.Location);
             if (h == 0) { DialogResult = DialogResult.OK; Close(); }
             else if (h == 1) { DialogResult = DialogResult.Cancel; Close(); }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            DashboardForm.AplicarMoldura(Handle);   // cantos arredondados no Windows 11
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)

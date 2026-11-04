@@ -10,8 +10,9 @@ using System.Windows.Forms;
 namespace CmdWatch.Gui
 {
     /// <summary>
-    /// Painel visual do cmdwatch. Mostra o fluxo de execucao de scripts .cmd/.bat:
-    /// as sessoes abertas, o detalhe de cada comando executado e o grafico de atividade.
+    /// Painel visual do cmdwatch. Barra superior (nome, estado, busca, pausar,
+    /// configuracoes), barra lateral de icones, faixa de estatisticas, tabelas
+    /// de sessoes e de janelas, fluxo de comandos e grafico de atividade.
     /// Clicar numa sessao filtra o fluxo; clicar de novo volta a mostrar todas.
     /// O idioma da interface (PT-BR / EN) e trocavel no rodape.
     /// </summary>
@@ -24,6 +25,7 @@ namespace CmdWatch.Gui
         private string _engineName = "polling";
         private bool _paused;
         private bool _inTray;
+        private readonly DateTime _inicio = DateTime.Now;
 
         // contadores
         private int _totalSessions, _totalSteps, _totalCalls;
@@ -48,13 +50,25 @@ namespace CmdWatch.Gui
         private LineChart _activity;
         private WindowTable _windows;
         private NeonCheckBox _checkTray;
-        private NeonToggle _lang;
+        private StatStrip _stats;
+        private SideBar _side;
+        private SearchBox _busca, _buscaFluxo;
+        private IconButton _btnPausa, _btnFiltro, _btnSessao, _btnCopiar, _btnLimpar, _btnFaixa, _btnIdioma;
+        private IconButton _navHome, _navLog, _navGrafico, _navConfig;
         private NotifyIcon _tray;
         private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
         private readonly ContextMenuStrip _ctxMenu = new ContextMenuStrip();
+        private readonly ContextMenuStrip _dropMenu = new ContextMenuStrip();
         private System.Windows.Forms.Timer _tick, _slow;
-        private const int HintH = 34;
-        private const int LangW = 150;
+
+        // filtro da tabela de sessoes: 0 todas, 1 em execucao, 2 encerradas
+        private int _filtroSessoes;
+
+        private const int TopH = 52;       // barra superior
+        private const int SideW = 52;      // barra lateral
+        private const int FootH = 38;      // rodape
+        private const int Pad = 14;
+        private const int Gap = 10;
 
         // aviso temporario no rodape (ex.: "script encerrado")
         private string _notice = "";
@@ -64,9 +78,9 @@ namespace CmdWatch.Gui
         public DashboardForm(Options opts)
         {
             _opts = opts;
-            Text = Lang.T("windowTitle");
+            Text = Lang.T("v2Title");
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(1120, 720);
+            MinimumSize = new Size(1000, 620);
             BackColor = Theme.Bg;
             ForeColor = Theme.Text;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
@@ -77,7 +91,7 @@ namespace CmdWatch.Gui
             try { Icon = AppIcon.Get(32); } catch { }
 
             BuildUi();
-            ClientSize = new Size(1460, 900);
+            ClientSize = new Size(1440, 880);
 
             _tick = new System.Windows.Forms.Timer();
             _tick.Interval = 1000;
@@ -91,14 +105,24 @@ namespace CmdWatch.Gui
         }
 
         // ------------------------------------------------------------ UI
+        private IconButton Botao(Control pai, string glyph, string label, bool chevron, EventHandler click)
+        {
+            IconButton b = new IconButton { Glyph = glyph, Label = label, Chevron = chevron };
+            b.BackColor = pai is NeonPanel ? Theme.Panel : Theme.Bg;
+            if (click != null) b.Click += click;
+            pai.Controls.Add(b);
+            return b;
+        }
+
         private void BuildUi()
         {
-            _pSessions = new NeonPanel { Title = Lang.T("sessions"), Accent = Theme.Cyan };
-            _pStream = new NeonPanel { Title = Lang.T("flow"), Accent = Theme.Cyan };
-            _pActivity = new NeonPanel { Title = Lang.T("activity"), Accent = Theme.Cyan };
-            _pWindows = new NeonPanel { Title = Lang.T("windows"), Accent = Theme.Amber };
+            _pSessions = new NeonPanel();
+            _pStream = new NeonPanel();
+            _pActivity = new NeonPanel();
+            _pWindows = new NeonPanel();
 
             _sessions = new SessionTable();
+            _sessions.Name = _sessions.Text = "tabelaSessoes";   // nome estavel para automacao de UI (tools\test-painel.ps1)
             _sessions.SelectionChanged += OnSelectionChanged;
             _sessions.ContextRequested += OnSessionContext;
             _pSessions.Controls.Add(_sessions);
@@ -106,85 +130,167 @@ namespace CmdWatch.Gui
             _stream = new NeonFlow();
             _pStream.Controls.Add(_stream);
 
-            _activity = new LineChart { LabelA = Lang.T("cmdPerSec"), LabelB = Lang.T("sessPerSec"), Capacity = 60 };
+            _activity = new LineChart { Capacity = 60 };
             _pActivity.Controls.Add(_activity);
 
             _windows = new WindowTable();
+            _windows.Name = _windows.Text = "tabelaJanelas";
             _pWindows.Controls.Add(_windows);
 
-            _checkTray = new NeonCheckBox
-            {
-                Label = Lang.T("trayCheck"),
-                Accent = Theme.Green
-            };
+            _stats = new StatStrip();
+
+            // barra lateral: cada icone faz algo real (ver dicas)
+            _side = new SideBar();
+            _navHome = _side.Add("\uE80F");
+            _navHome.Active = true;
+            _navHome.Click += delegate { VisaoGeral(); };
+            _navLog = _side.Add("\uE756");
+            _navLog.Click += delegate { OpenLogFile(); };
+            _navGrafico = _side.Add("\uE9D2");
+            _navGrafico.Click += delegate { MenuFaixa(_navGrafico); };
+            _navConfig = _side.Add("\uE713");
+            _navConfig.Click += delegate { MostrarConfig(); };
+
+            // barra superior
+            _busca = new SearchBox { Name = "busca" };
+            _busca.Box.TextChanged += delegate { OnSlowTick(null, EventArgs.Empty); };
+            _btnPausa = Botao(this, "\uE769", "", false, delegate { SetPaused(!_paused); });
+
+            // cabecalhos dos cartoes
+            _btnFiltro = Botao(_pSessions, "\uE71C", "", true, delegate { MenuFiltro(); });
+            _btnSessao = Botao(_pStream, "\uE756", "", true, delegate { MenuSessao(); });
+            _buscaFluxo = new SearchBox { BackColor = Theme.Panel };
+            _buscaFluxo.Box.TextChanged += delegate { RebuildStream(); };
+            _pStream.Controls.Add(_buscaFluxo);
+            _btnCopiar = Botao(_pStream, "\uE8C8", "", false, delegate { CopiarFluxo(); });
+            _btnLimpar = Botao(_pStream, "\uE74D", "", false, delegate { LimparFluxo(); });
+            _btnFaixa = Botao(_pActivity, "", "", true, delegate { MenuFaixa(_btnFaixa); });
+
+            // rodape
+            _checkTray = new NeonCheckBox();
             _checkTray.CheckedChanged += OnTrayCheckChanged;
+            _btnIdioma = Botao(this, "", "", true, delegate { MenuIdioma(); });
 
-            // seletor de idioma: o indice inicial vem da preferencia salva
-            _lang = new NeonToggle { Caption = Lang.T("langLabel") };
-            _lang.Index = (Lang.Atual == Idioma.En) ? 1 : 0;
-            _lang.IndexChanged += OnLanguageIndexChanged;
+            // menus (contexto da sessao e listas suspensas)
+            foreach (ContextMenuStrip m in new[] { _ctxMenu, _dropMenu })
+            {
+                m.Renderer = new NeonMenuRenderer();
+                m.ShowImageMargin = false;
+                m.ShowCheckMargin = false;
+                m.Font = Theme.Ui;
+            }
 
-            // menu de contexto da sessao (botao direito na tabela de sessoes)
-            _ctxMenu.Renderer = new NeonMenuRenderer();
-            _ctxMenu.ShowImageMargin = false;
-            _ctxMenu.ShowCheckMargin = false;
-
+            Controls.Add(_side);
+            Controls.Add(_stats);
             Controls.Add(_pSessions);
+            Controls.Add(_pWindows);
             Controls.Add(_pStream);
             Controls.Add(_pActivity);
-            Controls.Add(_pWindows);
             Controls.Add(_checkTray);
-            Controls.Add(_lang);
+            Controls.Add(_busca);
 
+            ApplyTexts();
             LayoutDashboard();
+        }
+
+        /// <summary>Textos de todos os controles no idioma corrente.</summary>
+        private void ApplyTexts()
+        {
+            Text = Lang.T("v2Title");
+            _pSessions.Title = Lang.T("v2Sessions");
+            _pWindows.Title = Lang.T("v2Windows");
+            _pStream.Title = Lang.T("v2Flow");
+            _pActivity.Title = Lang.T("v2Activity");
+            _activity.LabelA = Lang.T("v2LegCmd");
+            _activity.LabelB = Lang.T("v2LegSess");
+            _stats.Labels = new[] { Lang.T("v2StatSess"), Lang.T("v2StatWin"), Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
+            _busca.Cue = Lang.T("v2Search");
+            _buscaFluxo.Cue = Lang.T("v2FlowSearch");
+            _btnPausa.Glyph = _paused ? "\uE768" : "\uE769";
+            _btnPausa.Label = _paused ? Lang.T("v2Resume") : Lang.T("v2Pause");
+            _btnFiltro.Label = Lang.T(_filtroSessoes == 1 ? "v2FilterRun" : _filtroSessoes == 2 ? "v2FilterEnd" : "v2FilterAll");
+            _btnSessao.Label = Lang.F("v2FlowSess", NomeSessao(_selectedPid));
+            _btnCopiar.Tip = Lang.T("v2Copy");
+            _btnLimpar.Tip = Lang.T("v2Clear");
+            _btnFaixa.Label = Lang.F("v2Range", _activity.Capacity);
+            _checkTray.Label = Lang.T("v2Tray");
+            _btnIdioma.Label = Lang.Atual == Idioma.En ? "EN" : "PT-BR";
+            _navHome.Tip = Lang.T("v2NavHome");
+            _navLog.Tip = Lang.T("v2NavLog");
+            _navGrafico.Tip = Lang.T("v2NavChart");
+            _navConfig.Tip = Lang.T("v2Settings");
         }
 
         private void LayoutDashboard()
         {
-            if (_pSessions == null || _pStream == null || _pActivity == null || _sessions == null) return;
-
-            int pad = 8;
+            if (_pSessions == null || _btnIdioma == null) return;
             int w = ClientSize.Width, h = ClientSize.Height;
-            int bottom = h - pad - HintH;
+            if (w < 200 || h < 200) return;
 
-            // tres faixas: sessoes (tabela), janelas visiveis (tabela) e o
-            // fluxo com o grafico. As duas tabelas ficam com a largura toda:
-            // sao colunas de verdade, e estreitar corta o titulo da janela.
-            int totalH = bottom - pad * 2;
-            int sessH = (int)(totalH * 0.30);
-            if (sessH < 132) sessH = 132;
-            int winH = (int)(totalH * 0.26);
-            if (winH < 120) winH = 120;
-            int midH = totalH - sessH - winH - pad * 2;
-            if (midH < 160) midH = 160;
+            // barra superior: busca, pausar e engrenagem a direita
+            int bh = 30, by = (TopH - bh) / 2;
+            int pw = _btnPausa.PreferredW() + 6;
+            _btnPausa.SetBounds(w - Pad - pw, by, pw, bh);   // configuracoes ficam so na barra lateral
+            int sw = Math.Min(260, Math.Max(160, w / 6));
+            _busca.SetBounds(_btnPausa.Left - 14 - sw, by, sw, bh);
 
-            int sessY = pad;
-            int winY = sessY + sessH + pad;
-            int midY = winY + winH + pad;
+            _side.SetBounds(0, TopH, SideW, h - TopH - FootH);
 
-            _pSessions.SetBounds(pad, sessY, w - pad * 2, sessH);
-            _pWindows.SetBounds(pad, winY, w - pad * 2, winH);
+            int x0 = SideW + Pad, cw = w - x0 - Pad;
+            int y = TopH + 62;                       // titulo da pagina + subtitulo
+            bool compacto = h < 760;                 // janela baixa: cabecalhos e minimos menores
+            int cab = compacto ? 34 : 40;
+            foreach (NeonPanel np in new[] { _pSessions, _pWindows, _pStream, _pActivity }) np.HeaderHeight = cab;
+            int statH = compacto ? 52 : 62;
+            _stats.SetBounds(x0, y, cw, statH);
+            y += statH + Gap;
 
-            // o fluxo usa o formato do CLI (linhas longas, sem quebra): ganha
-            // mais largura e o grafico de atividade fica na coluna da direita
-            int flowW = (int)((w - pad * 3) * 0.70);
-            _pStream.SetBounds(pad, midY, flowW, midH);
+            int resto = h - FootH - Gap - y;
+            int minT = cab + 26 + 2 * 24 + 6;        // cabecalho + colunas + 2 linhas
+            int sessH = Math.Max(minT, (int)(resto * 0.25));
+            int winH = Math.Max(minT, (int)(resto * 0.30));
+            int midH = Math.Max(130, resto - sessH - winH - Gap * 2);
+            _pSessions.SetBounds(x0, y, cw, sessH);
+            y += sessH + Gap;
+            _pWindows.SetBounds(x0, y, cw, winH);
+            y += winH + Gap;
+            int flowW = (int)((cw - Gap) * 0.64);
+            _pStream.SetBounds(x0, y, flowW, midH);
+            _pActivity.SetBounds(x0 + flowW + Gap, y, cw - flowW - Gap, midH);
 
-            int colX = pad + flowW + pad;
-            int colW = Math.Max(240, w - pad * 3 - flowW);
-            _pActivity.SetBounds(colX, midY, colW, midH);
+            // controles dos cabecalhos dos cartoes (alinhados a direita)
+            int hb = 26, hy = (_pSessions.HeaderHeight - hb) / 2;
+            int fw = Math.Max(140, _btnFiltro.PreferredW());
+            _btnFiltro.SetBounds(_pSessions.Width - 12 - fw, hy, fw, hb);
+            int fx = _pStream.Width - 12;
+            _btnLimpar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 6;
+            _btnCopiar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 10;
+            int qw = Math.Min(170, Math.Max(90, _pStream.Width / 5));
+            _buscaFluxo.SetBounds(fx - qw, hy, qw, hb); fx -= qw + 10;
+            int ssw = Math.Min(220, Math.Max(120, _btnSessao.PreferredW()));
+            ssw = Math.Min(ssw, fx - 170);
+            _btnSessao.SetBounds(fx - ssw, hy, Math.Max(60, ssw), hb);
+            int rw = _btnFaixa.PreferredW();
+            _btnFaixa.SetBounds(_pActivity.Width - 12 - rw, hy, rw, hb);
 
-            _checkTray.SetBounds(pad + 2, h - pad - HintH + 4, CheckboxWidth(), 24);
-            _lang.SetBounds(w - pad - LangW - 2, h - pad - HintH + 4, LangW, 24);
-
-            Rectangle sa = _pSessions.PlotArea;
-            _sessions.SetBounds(sa.X, sa.Y, sa.Width, sa.Height);
+            foreach (var par in new KeyValuePair<NeonPanel, Control>[] {
+                new KeyValuePair<NeonPanel, Control>(_pSessions, _sessions),
+                new KeyValuePair<NeonPanel, Control>(_pWindows, _windows) })
+            {
+                Rectangle a = par.Key.PlotArea;
+                par.Value.SetBounds(a.X, a.Y, a.Width, a.Height);
+            }
             Rectangle ta = _pStream.PlotArea;
-            _stream.SetBounds(ta.X, ta.Y, ta.Width, ta.Height);
+            _stream.SetBounds(ta.X + 10, ta.Y, ta.Width - 16, ta.Height);
             Rectangle aa = _pActivity.PlotArea;
-            _activity.SetBounds(aa.X, aa.Y, aa.Width, aa.Height);
-            Rectangle wa = _pWindows.PlotArea;
-            _windows.SetBounds(wa.X, wa.Y, wa.Width, wa.Height);
+            _activity.SetBounds(aa.X + 6, aa.Y, aa.Width - 12, aa.Height);
+
+            // rodape
+            int fy = h - FootH;
+            _checkTray.SetBounds(x0 + 150, fy + (FootH - 22) / 2, CheckboxWidth(), 22);
+            int iw = 78;
+            _btnIdioma.SetBounds(w - Pad - iw, fy + (FootH - 26) / 2, iw, 26);
+            Invalidate();
         }
 
         protected override void OnResize(EventArgs e)
@@ -193,70 +299,183 @@ namespace CmdWatch.Gui
             LayoutDashboard();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            e.Graphics.Clear(Theme.Bg);
-
-            DrawVersion(e.Graphics);
-
-            string info;
-            bool temAviso = _notice.Length > 0 && DateTime.Now < _noticeUntil;
-            if (temAviso)
-            {
-                info = _notice;
-            }
-            else if (_selectedPid != 0)
-            {
-                string script = "";
-                foreach (SessionRow r in _rows)
-                    if (r.Pid == _selectedPid) { script = r.Script; break; }
-                info = Lang.F("hintFocus", script, _selectedPid);
-            }
-            else
-            {
-                info = Lang.T("hintAll") +
-                       (_paused ? "   -   " + Lang.T("paused") : "");
-            }
-
-            // a dica nao invade o seletor de idioma no canto direito
-            Rectangle hint = new Rectangle(0, ClientSize.Height - HintH,
-                Math.Max(200, ClientSize.Width - LangW - 24), HintH);
-
-            TextRenderer.DrawText(e.Graphics, info, Theme.Ui, hint,
-                temAviso ? _noticeColor : Theme.Dim,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        }
-
-        /// <summary>
-        /// Largura do checkbox do rodape: o quadrado (16) + a folga (9) + o texto
-        /// real. Medir o texto evita deixar uma faixa vazia (e, principalmente,
-        /// evita que o fundo do checkbox tape a versao desenhada ao lado).
-        /// </summary>
         private int CheckboxWidth()
         {
-            try
-            {
-                int tw = TextRenderer.MeasureText(_checkTray.Label, Theme.Ui).Width;
-                return 16 + 9 + tw + 10;
-            }
-            catch { return 460; }
+            try { return 15 + 9 + TextRenderer.MeasureText(_checkTray.Label, Theme.Ui).Width + 10; }
+            catch { return 260; }
         }
 
-        /// <summary>
-        /// Desenha a versao do cmdwatch no rodape, logo depois do checkbox.
-        /// </summary>
-        private void DrawVersion(Graphics g)
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.Bg);
+            int w = ClientSize.Width, h = ClientSize.Height;
+            const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+
+            // barra superior: icone de terminal, nome, divisoria e o estado
+            using (Pen p = new Pen(Theme.Border))
+            {
+                g.DrawLine(p, 0, TopH - 1, w, TopH - 1);
+                g.DrawLine(p, 0, h - FootH, w, h - FootH);
+            }
+            Rectangle ic = new Rectangle(14, (TopH - 28) / 2, 32, 28);
+            Theme.DrawPanel(g, ic, 6, Color.FromArgb(24, Theme.Teal), Color.FromArgb(170, Theme.Teal));
+            Theme.DrawIcon(g, "\uE756", ic, Theme.Teal);
+            int x = ic.Right + 14;
+            TextRenderer.DrawText(g, "cmdwatch", Theme.UiTitle, new Rectangle(x, 0, 200, TopH), Theme.Text, L);
+            x += TextRenderer.MeasureText(g, "cmdwatch", Theme.UiTitle, Size.Empty, L).Width + 16;
+            using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, x, 16, x, TopH - 16);
+            x += 16;
+            string est = _paused ? Lang.T("v2Paused") : Lang.T("v2Monitoring");
+            Color cest = _paused ? Theme.Amber : Theme.Green;
+            int ew = TextRenderer.MeasureText(g, est, Theme.Ui, Size.Empty, L).Width + 30;
+            Rectangle pill = new Rectangle(x, (TopH - 24) / 2, ew, 24);
+            Theme.DrawPanel(g, pill, 12, Color.FromArgb(28, cest), Color.FromArgb(150, cest));
+            Theme.DrawDot(g, pill.X + 12, pill.Y + 12, 7, cest);
+            TextRenderer.DrawText(g, est, Theme.Ui, new Rectangle(pill.X + 21, pill.Y, ew - 21, pill.Height), cest, L);
+
+            // titulo da pagina
+            int x0 = SideW + Pad;
+            TextRenderer.DrawText(g, Lang.T("v2Page"), Theme.UiPage, new Rectangle(x0, TopH + 6, 600, 34), Theme.Text, L);
+            TextRenderer.DrawText(g, Lang.T("v2PageSub"), Theme.Ui, new Rectangle(x0, TopH + 38, 700, 20), Theme.Dim, L);
+
+            // rodape: estado, versao e aviso temporario / foco
+            int fy = h - FootH;
+            Theme.DrawDot(g, x0 + 4, fy + FootH / 2, 7, cest);
+            TextRenderer.DrawText(g, _paused ? Lang.T("v2FooterPaused") : Lang.T("v2FooterOn"), Theme.Ui,
+                new Rectangle(x0 + 14, fy, 140, FootH), Theme.Text, L);
+            string ver = "v" + Program.Version;
+            int vw = TextRenderer.MeasureText(g, ver, Theme.Ui, Size.Empty, L).Width;
+            int vx = _btnIdioma.Left - 16 - vw;
+            TextRenderer.DrawText(g, ver, Theme.Ui, new Rectangle(vx, fy, vw + 4, FootH), Theme.Dim, L);
+
+            string info = "";
+            Color ci = Theme.Dim;
+            if (_notice.Length > 0 && DateTime.Now < _noticeUntil) { info = _notice; ci = _noticeColor; }
+            else if (_selectedPid != 0) info = Lang.F("hintFocus", NomeSessao(_selectedPid), _selectedPid);
+            if (info.Length > 0)
+            {
+                int ix = _checkTray.Right + 20;
+                TextRenderer.DrawText(g, info, Theme.Ui, new Rectangle(ix, fy, Math.Max(20, vx - 20 - ix), FootH), ci,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+            }
+        }
+
+        // ------------------------------------------------- acoes da interface
+        private string NomeSessao(int pid)
+        {
+            if (pid == 0) return Lang.T("v2FlowAll");
+            SessionRow r;
+            return _rowByPid.TryGetValue(pid, out r) ? r.Script : ("PID " + pid);
+        }
+
+        /// <summary>Pausa (ou retoma) a exibicao: os eventos que chegam durante a pausa sao descartados pelo painel; o motor continua capturando.</summary>
+        private void SetPaused(bool v)
+        {
+            _paused = v;
+            ApplyTexts();
+            LayoutDashboard();
+            _btnPausa.Invalidate();
+        }
+
+        /// <summary>Icone "Visao geral": limpa a busca, o filtro e a selecao de sessao.</summary>
+        private void VisaoGeral()
+        {
+            _busca.Box.Text = "";
+            _buscaFluxo.Box.Text = "";
+            _filtroSessoes = 0;
+            _sessions.SetSelection(0);
+            ApplyTexts();
+            OnSlowTick(null, EventArgs.Empty);
+        }
+
+        private void AbrirMenu(Control ancora, IEnumerable<KeyValuePair<string, Action>> itens, string marcado)
+        {
+            _dropMenu.Items.Clear();
+            foreach (var it in itens)
+            {
+                var acao = it.Value;
+                var mi = new ToolStripMenuItem((it.Key == marcado ? "\u2713  " : "     ") + it.Key);
+                mi.Click += delegate { acao(); };
+                _dropMenu.Items.Add(mi);
+            }
+            try { _dropMenu.Show(ancora, new Point(0, ancora.Height + 2)); } catch { }
+        }
+
+        private void MenuFiltro()
+        {
+            var itens = new List<KeyValuePair<string, Action>>();
+            string[] k = { "v2FilterAll", "v2FilterRun", "v2FilterEnd" };
+            for (int i = 0; i < 3; i++)
+            {
+                int v = i;
+                itens.Add(new KeyValuePair<string, Action>(Lang.T(k[i]), delegate { _filtroSessoes = v; ApplyTexts(); LayoutDashboard(); OnSlowTick(null, EventArgs.Empty); }));
+            }
+            AbrirMenu(_btnFiltro, itens, Lang.T(k[_filtroSessoes]));
+        }
+
+        private void MenuSessao()
+        {
+            var itens = new List<KeyValuePair<string, Action>>();
+            itens.Add(new KeyValuePair<string, Action>(Lang.T("v2FlowAll"), delegate { _sessions.SetSelection(0); }));
+            foreach (SessionRow r in _rows.OrderByDescending(r => r.StartedAt).Take(20))
+            {
+                int pid = r.Pid;
+                itens.Add(new KeyValuePair<string, Action>(r.Script + "  (PID " + r.Pid + ")", delegate { _sessions.SetSelection(pid); }));
+            }
+            string marcado = _selectedPid == 0 ? Lang.T("v2FlowAll") : NomeSessao(_selectedPid) + "  (PID " + _selectedPid + ")";
+            AbrirMenu(_btnSessao, itens, marcado);
+        }
+
+        private void MenuFaixa(Control ancora)
+        {
+            var itens = new List<KeyValuePair<string, Action>>();
+            foreach (int s in new[] { 30, 60 })
+            {
+                int v = s;
+                itens.Add(new KeyValuePair<string, Action>(Lang.F("v2Range", s), delegate
+                {
+                    _activity.Capacity = v; ApplyTexts(); LayoutDashboard(); _activity.Invalidate();
+                }));
+            }
+            AbrirMenu(ancora, itens, Lang.F("v2Range", _activity.Capacity));
+        }
+
+        private void MenuIdioma()
+        {
+            var itens = new List<KeyValuePair<string, Action>>
+            {
+                new KeyValuePair<string, Action>("PT-BR", delegate { OnLanguageIndexChanged(0); }),
+                new KeyValuePair<string, Action>("EN", delegate { OnLanguageIndexChanged(1); })
+            };
+            AbrirMenu(_btnIdioma, itens, Lang.Atual == Idioma.En ? "EN" : "PT-BR");
+        }
+
+        private void CopiarFluxo()
         {
             try
             {
-                string ver = "cmdwatch " + Program.Version;
-                int x = (_checkTray != null ? _checkTray.Right : 10) + 18;
-                int y = ClientSize.Height - HintH;
-
-                TextRenderer.DrawText(g, ver, Theme.Ui, new Rectangle(x, y, 220, HintH),
-                    Theme.Dim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                string t = _stream.AllText();
+                if (t.Length > 0) Clipboard.SetText(t);
+                ShowNotice(Lang.F("v2Copied", _stream.LineCount), Theme.Teal, 4);
             }
             catch { }
+        }
+
+        private void LimparFluxo()
+        {
+            _entries.Clear();
+            _stream.ClearFlow();
+        }
+
+        /// <summary>Engrenagem: mostra a configuracao em uso (somente leitura).</summary>
+        private void MostrarConfig()
+        {
+            string msg = Lang.F("v2SettingsMsg", _engineName, _opts.Interval,
+                _janelas != null ? Lang.T("v2On") : Lang.T("v2Off"),
+                _opts.LogPath.Length > 0 ? _opts.LogPath : Lang.T("v2NoLog"),
+                _opts.Filter.Length > 0 ? _opts.Filter : "*");
+            NeonDialog.Confirm(this, Lang.T("v2Settings"), msg, "OK", "", Theme.Teal);
         }
 
         // --------------------------------------------------------- motor
@@ -266,11 +485,28 @@ namespace CmdWatch.Gui
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            AplicarMoldura(Handle);
+        }
+
+        /// <summary>
+        /// Moldura da janela no Windows 11: modo claro/escuro conforme o tema,
+        /// cantos arredondados e barra de titulo na cor do fundo do painel (a
+        /// barra e o conteudo parecem uma peca so). Em sistemas sem esses
+        /// atributos as chamadas falham em silencio.
+        /// </summary>
+        internal static void AplicarMoldura(IntPtr hwnd)
+        {
             try
             {
-                int dark = 1;
-                DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
-                DwmSetWindowAttribute(Handle, 19, ref dark, sizeof(int));
+                int dark = Theme.Dark ? 1 : 0;
+                DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int));   // DWMWA_USE_IMMERSIVE_DARK_MODE
+                DwmSetWindowAttribute(hwnd, 19, ref dark, sizeof(int));   // idem, builds antigas
+                int canto = 2;                                            // DWMWCP_ROUND
+                DwmSetWindowAttribute(hwnd, 33, ref canto, sizeof(int));  // DWMWA_WINDOW_CORNER_PREFERENCE
+                int legenda = ColorTranslator.ToWin32(Theme.Bg);   // barra de titulo na cor do fundo
+                DwmSetWindowAttribute(hwnd, 35, ref legenda, sizeof(int)); // DWMWA_CAPTION_COLOR
+                int texto = ColorTranslator.ToWin32(Theme.Text);
+                DwmSetWindowAttribute(hwnd, 36, ref texto, sizeof(int));   // DWMWA_TEXT_COLOR
             }
             catch { }
         }
@@ -285,10 +521,9 @@ namespace CmdWatch.Gui
 
             try { _watcher.Seed(); } catch { }
 
-            string engine = _opts.Engine;
-            if (engine == "auto") engine = Program.IsAdmin() ? "wmi" : "polling";
+            string engine, aviso;
+            _engine = EngineFactory.Criar(_opts.Engine, _opts.Interval, Program.IsAdmin(), out engine, out aviso);
             _engineName = engine;
-            _engine = engine == "wmi" ? (IEngine)new WmiEngine() : new PollingEngine(_opts.Interval);
 
             // observador de janelas: cada janela que abre vira um evento e
             // acorda o motor de processos na hora
@@ -354,8 +589,8 @@ namespace CmdWatch.Gui
                 Close();
                 return true;
             }
-            if (keyData == Keys.Space) { _paused = !_paused; Invalidate(); return true; }
-            if (keyData == Keys.F5) { _entries.Clear(); _stream.ClearFlow(); return true; }
+            if (keyData == Keys.Space && !(ActiveControl is TextBox) && !(ActiveControl is SearchBox)) { SetPaused(!_paused); return true; }
+            if (keyData == Keys.F5) { LimparFluxo(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
@@ -424,7 +659,7 @@ namespace CmdWatch.Gui
         {
             _inTray = false;
             try { if (_tray != null) _tray.Visible = false; } catch { }
-            _checkTray.Checked = false;
+            _checkTray.Checked = false;   // sem disparar o evento
             _checkTray.Invalidate();
             Show();
             WindowState = FormWindowState.Normal;
@@ -461,40 +696,14 @@ namespace CmdWatch.Gui
         /// <summary>Redesenha toda a interface no idioma escolhido.</summary>
         private void ApplyLanguage()
         {
-            Text = Lang.T("windowTitle");
-
-            _pSessions.Title = Lang.T("sessions");
-            _pStream.Title = Lang.T("flow");
-            _pActivity.Title = Lang.T("activity");
-            _pWindows.Title = Lang.T("windows");
-
-            _checkTray.Label = Lang.T("trayCheck");
-            _activity.LabelA = Lang.T("cmdPerSec");
-            _activity.LabelB = Lang.T("sessPerSec");
-            _lang.Caption = Lang.T("langLabel");
-
-            _pSessions.TitleValue = SessionsTitle();
-            _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
-            _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
-
-            _pSessions.Invalidate();
-            _pStream.Invalidate();
-            _pActivity.Invalidate();
-            _pWindows.Invalidate();
-            _activity.Invalidate();
-            _checkTray.Invalidate();
-            _lang.Invalidate();
-            _sessions.Invalidate();
-            _windows.Invalidate();
-
-            // o texto do checkbox muda de idioma: refaz o rodape
+            ApplyTexts();
             LayoutDashboard();
             RebuildStream();
             ApplyTrayTexts();
-
             // o menu de contexto fica com o rotulo antigo: fecha
             try { if (_ctxMenu.Visible) _ctxMenu.Close(); } catch { }
-
+            foreach (Control c in new Control[] { _pSessions, _pStream, _pActivity, _pWindows, _sessions, _windows, _activity, _stats, _checkTray })
+                c.Invalidate();
             Invalidate();
         }
 
@@ -541,7 +750,7 @@ namespace CmdWatch.Gui
                 Lang.T("confirmYes"), Lang.T("confirmNo"), Theme.Red);
             if (!ok) return;
 
-            TerminateResult res = ProcessControl.Terminate(r.Pid, true);
+            TerminateResult res = ProcessControl.Terminate(r.Pid, true, r.CmdStartedAt);
             if (res.Ok)
             {
                 // a sessao morre agora: o monitor ainda emitira o batch_close
@@ -665,6 +874,10 @@ namespace CmdWatch.Gui
                     _winOrder.Add(rec.Hwnd);
                 }
                 r.Title = rec.Title;
+                r.AuthorName = rec.AuthorName;
+                r.Origin = "";
+                if (rec.Chain.Count > 0 && rec.Chain[0] != null && rec.Chain[0].Name.Length > 0)
+                    r.Origin = rec.Chain[0].Name + " (" + rec.Chain[0].Pid + ")";
                 r.Author = (rec.AuthorName.Length > 0 ? rec.AuthorName : "?") + " (" + rec.AuthorPid + ")";
                 if (rec.Chain.Count > 0)
                 {
@@ -672,10 +885,10 @@ namespace CmdWatch.Gui
                     if (pai != null && pai.Name.Length > 0)
                         r.Author = r.Author + " <= " + pai.Name + "(" + pai.Pid + ")";
                 }
-                r.CmdLine = rec.AuthorCmdLine;
+                r.CmdLine = Mascara.Aplicar(rec.AuthorCmdLine);
                 if (rec.Chain.Count > 0 && rec.Chain[0] != null && rec.Chain[0].CmdLine.Length > 0
                     && (r.CmdLine == null || r.CmdLine.Length == 0))
-                    r.CmdLine = rec.Chain[0].CmdLine;
+                    r.CmdLine = Mascara.Aplicar(rec.Chain[0].CmdLine);
                 r.StartedAt = rec.FirstSeen;
                 r.Focus = rec.FocusCount;
                 r.Visible = rec.Visible;
@@ -713,7 +926,12 @@ namespace CmdWatch.Gui
             r.Pid = s.CmdPid;
             r.Script = s.ScriptName;
             r.StartedAt = s.StartedAt;
-            r.Caller = s.Caller != null ? s.Caller.Name + "(" + s.Caller.Pid + ")" : "?";
+            r.CmdStartedAt = s.CmdStartedAt;
+            // teste do encerramento seguro pelo painel (tools\test-painel.ps1): simula
+            // um registro velho, como se o pid tivesse sido reaproveitado
+            if (r.CmdStartedAt != DateTime.MinValue && Environment.GetEnvironmentVariable("CMDWATCH_TESTE_PID_VELHO") == "1")
+                r.CmdStartedAt = r.CmdStartedAt.AddSeconds(-10);
+            r.Caller = s.Caller != null ? s.Caller.Name + " (" + s.Caller.Pid + ")" : "—";
             r.Origin = s.Caller != null ? CallerDesc.Describe(s.Caller) : "desconhecida";
             _rows.Add(r);
             _rowByPid[s.CmdPid] = r;
@@ -755,6 +973,8 @@ namespace CmdWatch.Gui
             _entries.Add(en);
             if (_entries.Count > 4000) _entries.RemoveRange(0, 1000);
             List<HumanLine> lines = FormatEntry(en);
+            string q = _buscaFluxo != null ? _buscaFluxo.Box.Text.Trim() : "";
+            if (q.Length > 0) lines = lines.Where(l => Contem(l.Text, q)).ToList();
             if (_selectedPid == 0 || en.Pid == _selectedPid) _stream.Append(lines);
         }
 
@@ -780,6 +1000,9 @@ namespace CmdWatch.Gui
                 if (_selectedPid != 0 && en.Pid != _selectedPid) continue;
                 all.AddRange(FormatEntry(en));
             }
+            // busca no fluxo: so as linhas que contem o texto
+            string q = _buscaFluxo != null ? _buscaFluxo.Box.Text.Trim() : "";
+            if (q.Length > 0) all = all.Where(l => Contem(l.Text, q)).ToList();
             _stream.SetLines(all);
         }
 
@@ -787,9 +1010,15 @@ namespace CmdWatch.Gui
         {
             _selectedPid = _sessions.SelectedPid;
             RebuildStream();
-            _pStream.TitleValue = _selectedPid == 0 ? Lang.T("all") : ("PID " + _selectedPid);
-            _pStream.Invalidate();
+            ApplyTexts();
+            LayoutDashboard();
+            _btnSessao.Invalidate();
             Invalidate();
+        }
+
+        private static bool Contem(string texto, string busca)
+        {
+            return texto != null && texto.IndexOf(busca, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         /// <summary>Titulo do painel de sessoes: sessoes + chamadas de script.</summary>
@@ -829,13 +1058,14 @@ namespace CmdWatch.Gui
         {
             try
             {
-                _sessions.Rows = _rows.OrderByDescending(r => r.StartedAt).ToList();
+                // busca da barra superior: script, chamador ou pid; mais o filtro do cartao
+                string q = _busca != null ? _busca.Box.Text.Trim() : "";
+                _sessions.Rows = _rows.Where(r => (q.Length == 0 || Contem(r.Script, q) || Contem(r.Caller, q) || r.Pid.ToString() == q)
+                                                  && (_filtroSessoes == 0 || (_filtroSessoes == 1) != r.Closed))
+                                      .OrderByDescending(r => r.StartedAt).ToList();
                 _sessions.Invalidate();
-
-                _pSessions.TitleValue = SessionsTitle();
+                _pSessions.TitleValue = _sessions.Rows.Count.ToString();
                 _pSessions.Invalidate();
-                _pActivity.TitleValue = _totalSteps + " " + Lang.T("stepsShort");
-                _pActivity.Invalidate();
 
                 // a tabela de janelas: duracao correndo e estado atual
                 var winRows = new List<WindowRow>();
@@ -843,15 +1073,24 @@ namespace CmdWatch.Gui
                 {
                     WindowRow r;
                     if (!_winByHwnd.TryGetValue(h, out r)) continue;
+                    if (q.Length > 0 && !Contem(r.Title, q) && !Contem(r.Author, q) && !Contem(r.CmdLine, q)) continue;
                     winRows.Add(r);
                 }
                 _windows.Rows = winRows.OrderByDescending(r => r.StartedAt).ToList();
                 _windows.Invalidate();
-
-                int visiveis = 0;
-                foreach (WindowRow r in _windows.Rows) if (!r.Closed && r.Visible) visiveis++;
-                _pWindows.TitleValue = visiveis + " " + Lang.T("windowsShort");
+                _pWindows.TitleValue = _windows.Rows.Count.ToString();
                 _pWindows.Invalidate();
+
+                // estatisticas: valores reais do motor
+                int ativas = 0;
+                foreach (SessionRow r in _rows) if (!r.Closed) ativas++;
+                TimeSpan t = DateTime.Now - _inicio;
+                _stats.Values = new[]
+                {
+                    ativas.ToString(), _totalWindows.ToString(), _totalSteps.ToString(),
+                    ((int)t.TotalHours).ToString("00") + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00")
+                };
+                _stats.Invalidate();
             }
             catch { }
         }

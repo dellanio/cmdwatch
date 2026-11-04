@@ -11,11 +11,11 @@ namespace CmdWatch.Gui
     /// </summary>
     internal sealed class NeonMenuColors : ProfessionalColorTable
     {
-        private static readonly Color Sel = Color.FromArgb(46, Theme.Cyan);
+        private static readonly Color Sel = Theme.Cyan;
 
-        public override Color ToolStripDropDownBackground { get { return Theme.PanelDeep; } }
+        public override Color ToolStripDropDownBackground { get { return Theme.Panel; } }
         public override Color MenuBorder { get { return Theme.Border; } }
-        public override Color MenuItemBorder { get { return Color.FromArgb(150, Theme.Cyan); } }
+        public override Color MenuItemBorder { get { return Theme.Cyan; } }
         public override Color MenuItemSelected { get { return Sel; } }
         public override Color MenuItemSelectedGradientBegin { get { return Sel; } }
         public override Color MenuItemSelectedGradientEnd { get { return Sel; } }
@@ -44,7 +44,7 @@ namespace CmdWatch.Gui
 
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
-            using (SolidBrush b = new SolidBrush(Theme.PanelDeep))
+            using (SolidBrush b = new SolidBrush(Theme.Panel))
                 e.Graphics.FillRectangle(b, new Rectangle(Point.Empty, e.ToolStrip.Size));
         }
 
@@ -61,16 +61,14 @@ namespace CmdWatch.Gui
         {
             if (!e.Item.Enabled || !e.Item.Selected) return;
 
-            Rectangle r = new Rectangle(3, 1, e.Item.Width - 6, e.Item.Height - 2);
-            using (SolidBrush b = new SolidBrush(Color.FromArgb(46, Theme.Cyan)))
-                e.Graphics.FillRectangle(b, r);
-            using (Pen p = new Pen(Color.FromArgb(150, Theme.Cyan)))
-                e.Graphics.DrawRectangle(p, r);
+            // selecao em pilula azul com texto branco
+            Rectangle r = new Rectangle(4, 1, e.Item.Width - 8, e.Item.Height - 2);
+            Theme.DrawPanel(e.Graphics, r, 5, Theme.Hover, Color.FromArgb(120, Theme.Teal));
         }
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            Color c = e.Item.Enabled ? Theme.Text : Theme.Dim;
+            Color c = !e.Item.Enabled ? Theme.Dim : (e.Item.Selected ? Theme.Teal : Theme.Text);
             Font f = e.TextFont ?? SystemFonts.MenuFont;
             TextRenderer.DrawText(e.Graphics, e.Text, f, e.TextRectangle, c,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);

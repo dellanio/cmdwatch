@@ -18,6 +18,8 @@ namespace CmdWatch.Gui
         public DateTime StartedAt = DateTime.Now;
         public DateTime ClosedAt = DateTime.Now;
         public bool Closed;
+        /// <summary>Hora real de inicio do cmd.exe (MinValue se desconhecida).</summary>
+        public DateTime CmdStartedAt = DateTime.MinValue;
 
         public double Elapsed
         {
@@ -50,6 +52,9 @@ namespace CmdWatch.Gui
         public bool Visible = true;
         public bool Closed;
         public bool ByConsole;
+        /// <summary>Nome do executavel autor (coluna "Processo") e o processo pai ("Processo de origem").</summary>
+        public string AuthorName = "";
+        public string Origin = "";
 
         /// <summary>Quanto tempo a janela ficou na tela (correndo enquanto aberta).</summary>
         public double DuracaoSeg
@@ -73,96 +78,282 @@ namespace CmdWatch.Gui
         }
     }
 
-    /// <summary>Paineis com cabecalho em matriz de pixels e moldura arredondada.</summary>
+    /// <summary>
+    /// Cartao do painel: superficie um tom acima do fundo, borda fina e cantos
+    /// de 8 px. O titulo fica a esquerda com o contador num selo (TitleValue);
+    /// os controles do cabecalho (filtros, botoes) sao filhos posicionados pelo
+    /// formulario na faixa HeaderHeight.
+    /// </summary>
     internal sealed class NeonPanel : Control
     {
         public string Title = "";
         public string TitleValue = "";
-        public Color Accent = Theme.Cyan;
-        public int TitleScale = 3;
-        public int HeaderHeight = 26;
+        public Color Accent = Theme.Teal;
+        public int HeaderHeight = 40;
 
         public NeonPanel()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Bg;
+            BackColor = Theme.Panel;
             ForeColor = Theme.Text;
         }
 
         public Rectangle PlotArea
         {
-            get
-            {
-                return new Rectangle(10, HeaderHeight + 6, Math.Max(10, Width - 20), Math.Max(10, Height - HeaderHeight - 14));
-            }
+            get { return new Rectangle(1, HeaderHeight, Math.Max(10, Width - 2), Math.Max(10, Height - HeaderHeight - 6)); }
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
-
-            // o fundo (gradiente, borda e marcações) nao muda entre repinturas:
-            // fica guardado como bitmap e e copiado - o gradiente por paint era
-            // um dos maiores custos do painel
             Bitmap fundo = Fundo();
             if (fundo != null) g.DrawImage(fundo, 0, 0);
-            else Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
 
-            Rectangle head = new Rectangle(12, 2, Math.Max(10, Width - 24), HeaderHeight - 4);
-            if (Title.Length > 0)
-                TechTitle.Draw(g, Title, head, Accent);
-
+            const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+            Rectangle head = new Rectangle(14, 0, Math.Max(10, Width - 28), HeaderHeight);
+            TextRenderer.DrawText(g, Title, Theme.UiTitle, head, Theme.Text, L);
             if (TitleValue.Length > 0)
             {
-                float tw = TechTitle.MeasureWidth(g, Title, Theme.TitleFont);
-                float vw = TechTitle.MeasureWidth(g, TitleValue, Theme.TitleFont);
-                if (12 + tw + 18 + vw < Width - 12)
-                    TechTitle.Draw(g, TitleValue, head, Accent, true);
+                int tw = TextRenderer.MeasureText(g, Title, Theme.UiTitle, Size.Empty, L).Width;
+                int vw = TextRenderer.MeasureText(g, TitleValue, Theme.UiSmall, Size.Empty, L).Width + 12;
+                Rectangle selo = new Rectangle(head.X + tw + 9, HeaderHeight / 2 - 9, Math.Max(20, vw), 18);
+                Theme.DrawPanel(g, selo, 4, Theme.Fill, Theme.Border);
+                TextRenderer.DrawText(g, TitleValue, Theme.UiSmall, selo, Theme.Text,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
         }
 
         private Bitmap _fundo;
         private int _fundoW = -1, _fundoH = -1;
 
+        // o fundo (cartao arredondado com antialias) so muda com o tamanho
+        private int _fundoCab;
         private Bitmap Fundo()
         {
             if (Width <= 0 || Height <= 0) return null;
-            if (_fundo != null && _fundoW == Width && _fundoH == Height) return _fundo;
-
+            if (_fundo != null && _fundoW == Width && _fundoH == Height && _fundoCab == HeaderHeight) return _fundo;
             try { if (_fundo != null) _fundo.Dispose(); } catch { }
-            _fundo = new Bitmap(Math.Max(1, Width), Math.Max(1, Height),
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            _fundoW = Width;
-            _fundoH = Height;
-
+            _fundo = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            _fundoW = Width; _fundoH = Height; _fundoCab = HeaderHeight;
             using (Graphics g = Graphics.FromImage(_fundo))
             {
                 g.Clear(Theme.Bg);
-                g.SmoothingMode = SmoothingMode.None;
                 Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
-
-                using (Pen p = new Pen(Theme.Grid))
-                    g.DrawLine(p, 10, HeaderHeight, Math.Max(10, Width - 11), HeaderHeight);
-
-                // marcacoes de escala sob a linha do cabecalho (detalhe de instrumento)
-                using (Pen tick = new Pen(Color.FromArgb(70, Accent)))
-                {
-                    for (int x = 14; x < Width - 12; x += 14)
-                        g.DrawLine(tick, x, HeaderHeight - 3, x, HeaderHeight);
-                }
             }
             return _fundo;
         }
     }
 
-    /// <summary>Caixa de selecao desenhada no tema do painel (o controle nativo ficaria claro).</summary>
+    /// <summary>
+    /// Botao desenhado: icone (glifo), texto opcional e seta de lista. Estilos:
+    /// contorno (cabecalhos), fantasma (barra lateral) e ativo (verde-agua).
+    /// </summary>
+    internal sealed class IconButton : Control
+    {
+        public string Glyph = "";
+        public string Label = "";
+        public bool Chevron;
+        public bool Ghost;
+        public bool Active;
+        public Color GlyphColor = Color.Empty;
+        private static readonly Font ChevFont = new Font(Theme.IconFont.FontFamily, 7f);
+        private bool _hot;
+        private readonly ToolTip _tip = new ToolTip();
+
+        public IconButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Theme.Bg;
+            Cursor = Cursors.Hand;
+        }
+
+        public string Tip { set { _tip.SetToolTip(this, value ?? ""); } }
+
+        /// <summary>Largura que cabe o icone, o texto e a seta.</summary>
+        public int PreferredW()
+        {
+            int w = 12;
+            if (Glyph.Length > 0) w += 18;
+            if (Label.Length > 0) w += TextRenderer.MeasureText(Label, Theme.Ui).Width + 4;
+            if (Chevron) w += 16;
+            return w + 6;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(BackColor);
+            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+            if (Active)
+                Theme.DrawPanel(g, r, 8, Color.FromArgb(34, Theme.Teal), Color.FromArgb(150, Theme.Teal));
+            else if (Ghost)
+            {
+                if (_hot) Theme.DrawPanel(g, r, 8, Theme.Hover, Color.Empty);
+            }
+            else
+                Theme.DrawPanel(g, r, 6, _hot ? Theme.Hover : Theme.Fill, Theme.Border);
+
+            Color fg = Active ? Theme.Teal : (Ghost ? (_hot ? Theme.Text : Theme.Dim) : Theme.Text);
+            int x = Glyph.Length > 0 && (Label.Length > 0 || Chevron) ? 10 : 0;
+            if (Glyph.Length > 0)
+            {
+                int gw = x == 0 ? Width : 18;
+                Theme.DrawIcon(g, Glyph, new Rectangle(x, 0, gw, Height), GlyphColor.A > 0 ? GlyphColor : fg,
+                    Ghost ? Theme.IconBig : Theme.IconFont);
+                x += gw + 4;
+            }
+            if (Label.Length > 0)
+            {
+                if (Glyph.Length == 0) x = 10;
+                int lw = Width - x - (Chevron ? 22 : 6);
+                TextRenderer.DrawText(g, Label, Theme.Ui, new Rectangle(x, 0, Math.Max(4, lw), Height), Theme.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            }
+            if (Chevron)
+                Theme.DrawIcon(g, "\uE70D", new Rectangle(Width - 22, 1, 16, Height), Theme.Dim,
+                    ChevFont);
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hot = true; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hot = false; Invalidate(); }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _tip.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>Campo de busca: caixa arredondada com lupa e texto de dica.</summary>
+    internal sealed class SearchBox : Control
+    {
+        public readonly TextBox Box = new TextBox();
+        private string _cue = "";
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, string l);
+
+        public SearchBox()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+            Box.BorderStyle = BorderStyle.None;
+            Box.Font = Theme.Ui;
+            Box.BackColor = Theme.Fill;
+            Box.ForeColor = Theme.Text;
+            Box.HandleCreated += delegate { AplicarDica(); };
+            Controls.Add(Box);
+            Cursor = Cursors.IBeam;
+        }
+
+        public string Cue { get { return _cue; } set { _cue = value ?? ""; AplicarDica(); } }
+
+        private void AplicarDica()
+        {
+            try { if (Box.IsHandleCreated) SendMessage(Box.Handle, 0x1501, (IntPtr)1, _cue); } catch { }
+        }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            int h = Box.PreferredHeight;
+            Box.SetBounds(30, (Height - h) / 2 + 1, Math.Max(10, Width - 38), h);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); Box.Focus(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(BackColor);
+            Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 6, Theme.Fill, Box.Focused ? Theme.Teal : Theme.Border);
+            Theme.DrawIcon(g, "\uE721", new Rectangle(8, 0, 18, Height), Theme.Dim);
+        }
+    }
+
+    /// <summary>Faixa de estatisticas: icone, numero grande e rotulo, separados por divisorias.</summary>
+    internal sealed class StatStrip : Control
+    {
+        public string[] Glyphs = { "\uE756", "\uE737", "\uE81E", "\uE823" };
+        public string[] Values = { "0", "0", "0", "00:00:00" };
+        public string[] Labels = { "", "", "", "" };
+
+        public StatStrip()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(Theme.Bg);
+            Theme.DrawPanel(g, new Rectangle(0, 0, Width - 1, Height - 1), 8, Theme.Panel, Theme.Border);
+            int n = Values.Length;
+            int cw = Width / n;
+            const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
+            for (int i = 0; i < n; i++)
+            {
+                int x = i * cw;
+                if (i > 0) using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, x, 12, x, Height - 12);
+                Rectangle ic = new Rectangle(x + 16, (Height - 30) / 2, 32, 30);
+                if (i == 0) Theme.DrawPanel(g, ic, 6, Color.FromArgb(30, Theme.Teal), Color.FromArgb(120, Theme.Teal));
+                Theme.DrawIcon(g, Glyphs[i], ic, Theme.Teal, Theme.IconBig);
+                int tx = ic.Right + 14;
+                int nh = Theme.UiStat.Height;
+                int top = (Height - nh - Theme.UiSmall.Height) / 2;
+                TextRenderer.DrawText(g, Values[i], Theme.UiStat, new Rectangle(tx, top, cw - (tx - x) - 8, nh), Theme.Text, L);
+                TextRenderer.DrawText(g, Labels[i], Theme.UiSmall, new Rectangle(tx, top + nh, cw - (tx - x) - 8, Theme.UiSmall.Height + 2), Theme.Dim, L);
+            }
+        }
+    }
+
+    /// <summary>Barra lateral estreita de icones; o item ativo fica em verde-agua.</summary>
+    internal sealed class SideBar : Control
+    {
+        public readonly List<IconButton> Items = new List<IconButton>();
+
+        public SideBar()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+        }
+
+        public IconButton Add(string glyph)
+        {
+            IconButton b = new IconButton { Glyph = glyph, Ghost = true, BackColor = Theme.Bg };
+            Items.Add(b);
+            Controls.Add(b);
+            PerformLayout();
+            return b;
+        }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            int s = Math.Min(36, Width - 12);
+            for (int i = 0; i < Items.Count; i++)
+                Items[i].SetBounds((Width - 1 - s) / 2, 12 + i * (s + 12), s, s);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Theme.Bg);
+            using (Pen p = new Pen(Theme.Border)) e.Graphics.DrawLine(p, Width - 1, 0, Width - 1, Height);
+        }
+    }
+
+    /// <summary>Caixa de selecao do rodape (quadrado com contorno; marcada em verde-agua).</summary>
     internal sealed class NeonCheckBox : Control
     {
         public bool Checked;
         public string Label = "";
-        public Color Accent = Theme.Green;
+        public Color Accent = Theme.Teal;
         public event Action<bool> CheckedChanged;
 
         public NeonCheckBox()
@@ -170,28 +361,27 @@ namespace CmdWatch.Gui
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Bg;
+            Cursor = Cursors.Hand;
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
-
-            int box = 16;
+            g.Clear(BackColor);
+            int box = 15;
             int y = (Height - box) / 2;
-            Rectangle r = new Rectangle(0, y, box, box);
-            Theme.DrawPanel(g, r, 3,
-                Checked ? Color.FromArgb(45, Accent) : Theme.PanelDeep,
-                Checked ? Accent : Theme.Border);
-
+            Theme.DrawPanel(g, new Rectangle(0, y, box, box), 3, Checked ? Accent : Theme.Panel, Checked ? Accent : Theme.Gray);
             if (Checked)
             {
-                using (Pen p = new Pen(Accent, 2f))
-                    g.DrawLines(p, new Point[] { new Point(4, y + 8), new Point(7, y + 12), new Point(12, y + 4) });
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Pen p = new Pen(Theme.Bg, 2f))
+                {
+                    p.StartCap = p.EndCap = LineCap.Round;
+                    g.DrawLines(p, new PointF[] { new PointF(3.5f, y + 7.5f), new PointF(6.5f, y + 10.5f), new PointF(11.5f, y + 4.5f) });
+                }
+                g.SmoothingMode = SmoothingMode.None;
             }
-
-            TextRenderer.DrawText(g, Label, Theme.Ui, new Rectangle(box + 9, 0, Width - box - 9, Height),
-                Checked ? Theme.Text : Theme.Dim,
+            TextRenderer.DrawText(g, Label, Theme.Ui, new Rectangle(box + 9, 0, Width - box - 9, Height), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
 
@@ -207,123 +397,6 @@ namespace CmdWatch.Gui
             Checked = value;
             Invalidate();
             if (CheckedChanged != null) CheckedChanged(Checked);
-        }
-    }
-
-    /// <summary>
-    /// Seletor segmentado (PT-BR | EN) usado no rodape para trocar o idioma da
-    /// interface. O segmento ativo recebe fundo ciano e texto em destaque.
-    /// </summary>
-    internal sealed class NeonToggle : Control
-    {
-        private string[] _options = { "PT-BR", "EN" };
-        private int _index;
-
-        public string Caption = "";
-        public Color Accent = Theme.Cyan;
-        public event Action<int> IndexChanged;
-
-        public NeonToggle()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Bg;
-            TabStop = true;
-        }
-
-        /// <summary>Indice da opcao ativa. Dispara IndexChanged ao mudar.</summary>
-        public int Index
-        {
-            get { return _index; }
-            set
-            {
-                int v = value;
-                if (v < 0) v = 0;
-                if (v > _options.Length - 1) v = _options.Length - 1;
-                if (_index == v) return;
-                _index = v;
-                Invalidate();
-                if (IndexChanged != null) IndexChanged(_index);
-            }
-        }
-
-        private int CaptionWidth(Graphics g)
-        {
-            if (Caption.Length == 0) return 0;
-            return TextRenderer.MeasureText(g, Caption, Theme.Ui).Width + 10;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
-
-            Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-            Theme.DrawPanel(g, r, 4, Theme.PanelDeep, Theme.Border);
-
-            int capW = CaptionWidth(g);
-            if (capW > 0)
-            {
-                TextRenderer.DrawText(g, Caption, Theme.Ui,
-                    new Rectangle(3, 0, capW, Height), Theme.Dim,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            }
-
-            int areaX = capW;
-            int areaW = Math.Max(20, Width - areaX - 2);
-            int segW = areaW / _options.Length;
-
-            for (int i = 0; i < _options.Length; i++)
-            {
-                Rectangle seg = new Rectangle(areaX + i * segW + 1, 2, segW - 2, Height - 5);
-                bool on = i == _index;
-                if (on)
-                {
-                    using (SolidBrush b = new SolidBrush(Color.FromArgb(38, Accent)))
-                        g.FillRectangle(b, seg);
-                    using (Pen p = new Pen(Color.FromArgb(120, Accent)))
-                        g.DrawRectangle(p, seg);
-                }
-                TextRenderer.DrawText(g, _options[i], Theme.UiBold, seg,
-                    on ? Accent : Theme.Dim,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            }
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-            int capW;
-            using (Graphics g = CreateGraphics())
-                capW = CaptionWidth(g);
-
-            int areaW = Math.Max(20, Width - capW - 2);
-            int segW = Math.Max(1, areaW / _options.Length);
-            int idx = (e.X - capW) / segW;
-            if (idx < 0) idx = 0;
-            if (idx > _options.Length - 1) idx = _options.Length - 1;
-            Index = idx;
-            Focus();
-        }
-
-        protected override bool IsInputKey(Keys keyData)
-        {
-            return keyData == Keys.Left || keyData == Keys.Right || base.IsInputKey(keyData);
-        }
-
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            base.OnKeyDown(e);
-            if (e.KeyCode == Keys.Left)
-            {
-                Index = Math.Max(0, _index - 1);
-                e.Handled = true;
-            }
-            else if (e.KeyCode == Keys.Right)
-            {
-                Index = Math.Min(_options.Length - 1, _index + 1);
-                e.Handled = true;
-            }
         }
     }
 
@@ -440,12 +513,7 @@ namespace CmdWatch.Gui
             g.SetClip(new Rectangle(0, 0, textW, textH));
             for (int i = 0; i < VisibleLines && _scrollY + i < _lines.Count; i++)
             {
-                HumanLine hl = _lines[_scrollY + i];
-                TextRenderer.DrawText(g, hl.Text, Theme.Mono,
-                    new Rectangle(PadX - _scrollX, 3 + i * lh, textW + _scrollX, lh),
-                    Theme.FlowColor(hl.Role),
-                    TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine |
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.NoClipping);
+                DrawFlowLine(g, _lines[_scrollY + i], PadX - _scrollX, 3 + i * lh, lh);
             }
             g.ResetClip();
 
@@ -468,6 +536,66 @@ namespace CmdWatch.Gui
                 int x = max == 0 ? 0 : (int)((double)_scrollX / max * (track.Width - thumb));
                 Theme.DrawScrollThumb(g, new Rectangle(x, track.Y + 1, thumb, BarW - 2), ThumbColor());
             }
+        }
+
+        private const TextFormatFlags LF = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine |
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoClipping | TextFormatFlags.NoPadding;
+
+        private void Seg(Graphics g, string t, ref int x, int y, int lh, Color c)
+        {
+            if (t.Length == 0) return;
+            TextRenderer.DrawText(g, t, Theme.Mono, new Rectangle(x, y, t.Length * _charW + 8, lh), c, LF);
+            x += t.Length * _charW;
+        }
+
+        /// <summary>
+        /// Uma linha do fluxo em cores: hora apagada, palavra-chave do evento na
+        /// cor dele (aberta azul, foco laranja, escondida cinza, fechada verde) e
+        /// o resto em texto normal. Os detalhes (dono, autor, cadeia...) ganham
+        /// o ramo "└". O texto e o mesmo do CLI; so o desenho muda.
+        /// </summary>
+        private void DrawFlowLine(Graphics g, HumanLine hl, int x, int y, int lh)
+        {
+            string t = hl.Text ?? "";
+            int fim = t.StartsWith("[") ? t.IndexOf("] ") : -1;
+            if (fim > 0)
+            {
+                Seg(g, t.Substring(0, fim + 1), ref x, y, lh, Theme.Dim);
+                string resto = t.Substring(fim + 1);
+                int ini = 0;
+                while (ini < resto.Length && resto[ini] == ' ') ini++;
+                int corte = resto.IndexOf("  ", ini);
+                if (corte < 0) corte = resto.Length;
+                string chave = resto.Substring(0, corte);
+                Color c = Theme.FlowColor(hl.Role);
+                if (chave.TrimStart().StartsWith("..")) c = Theme.Gray;
+                Seg(g, chave, ref x, y, lh, c);
+                // o alinhamento em colunas do CLI vira um espaco fixo (como na referencia)
+                Seg(g, "   " + resto.Substring(corte).TrimStart(), ref x, y, lh, hl.Role == HumanRole.Body ? Theme.Dim : Theme.Text);
+                return;
+            }
+
+            int n = 0;
+            while (n < t.Length && t[n] == ' ') n++;
+            int dois = t.IndexOf(" : ", n);
+            if (hl.Role == HumanRole.Body && n >= 4 && dois > n && dois - n < 16)
+            {
+                int bx = x + (n - 2) * _charW;
+                Seg(g, "\u2514", ref bx, y, lh, Theme.Gray);
+                x += n * _charW;
+                Seg(g, t.Substring(n, dois - n).TrimEnd() + ":  ", ref x, y, lh, Theme.Dim);
+                Seg(g, t.Substring(dois + 2).TrimStart(), ref x, y, lh, Theme.Text);
+                return;
+            }
+            Seg(g, t, ref x, y, lh, hl.Role == HumanRole.Body ? Theme.Dim : Theme.FlowColor(hl.Role));
+        }
+
+        /// <summary>Texto de todas as linhas exibidas (botao copiar).</summary>
+        public string AllText()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (HumanLine l in _lines) sb.AppendLine(l.Text);
+            return sb.ToString();
         }
 
         /// <summary>Cor do polegar: normal, sobre o mouse ou arrastando.</summary>
@@ -579,235 +707,270 @@ namespace CmdWatch.Gui
         }
     }
 
-    /// <summary>Grafico de linhas com duas series (verde e vermelho) sobre grade.</summary>
+    /// <summary>Grafico de area com duas series (comandos em azul, sessoes em verde-agua) e eixo de tempo.</summary>
     internal sealed class LineChart : Control
     {
         public List<double> SeriesA = new List<double>();
         public List<double> SeriesB = new List<double>();
         public string LabelA = "A";
         public string LabelB = "B";
+        /// <summary>Quantos segundos (pontos) mostrar: o fim e sempre "agora".</summary>
         public int Capacity = 60;
 
         public LineChart()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Bg;
+            BackColor = Theme.Panel;
+        }
+
+        private List<double> Ultimos(List<double> d)
+        {
+            if (d.Count <= Capacity) return d;
+            return d.GetRange(d.Count - Capacity, Capacity);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
+            g.Clear(Theme.Panel);
+            const TextFormatFlags C = TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter;
 
-            int left = 46, right = 46, top = 8, bottom = 18;
+            // legenda no alto
+            int lx = 40;
+            lx = Legenda(g, LabelA, Theme.Cyan, lx, 2) + 70;
+            Legenda(g, LabelB, Theme.Teal, lx, 2);
+
+            int left = 40, right = 16, top = 30, bottom = 22;
             Rectangle plot = new Rectangle(left, top, Math.Max(10, Width - left - right), Math.Max(10, Height - top - bottom));
+            List<double> a = Ultimos(SeriesA), b = Ultimos(SeriesB);
 
             double max = 1;
-            foreach (double v in SeriesA) if (v > max) max = v;
-            foreach (double v in SeriesB) if (v > max) max = v;
+            foreach (double v in a) if (v > max) max = v;
+            foreach (double v in b) if (v > max) max = v;
 
             using (Pen gp = new Pen(Theme.Grid))
             {
+                gp.DashStyle = DashStyle.Dot;
                 for (int i = 0; i <= 4; i++)
                 {
                     int y = plot.Bottom - (int)(plot.Height * i / 4.0);
                     g.DrawLine(gp, plot.Left, y, plot.Right, y);
-                }
-                int cols = Math.Max(2, Capacity / 10);
-                for (int i = 0; i <= cols; i++)
-                {
-                    int x = plot.Left + (int)(plot.Width * i / (double)cols);
-                    g.DrawLine(gp, x, plot.Top, x, plot.Bottom);
+                    string txt = (max * i / 4.0).ToString("0.#", System.Globalization.CultureInfo.CurrentCulture);
+                    TextRenderer.DrawText(g, txt, Theme.UiSmall, new Rectangle(0, y - 8, left - 8, 16), Theme.Dim, C | TextFormatFlags.Right);
                 }
             }
 
-            for (int i = 0; i <= 4; i++)
+            // eixo de tempo: 6 marcas de hora, a ultima e agora
+            DateTime agora = DateTime.Now;
+            for (int i = 0; i <= 6; i++)
             {
-                double frac = i / 4.0;
-                string txt = (max * frac).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-                TextRenderer.DrawText(g, txt, Theme.MonoSmall,
-                    new Rectangle(0, plot.Bottom - (int)(plot.Height * i / 4.0) - 8, left - 4, 16), Theme.Green,
-                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                TextRenderer.DrawText(g, txt, Theme.MonoSmall,
-                    new Rectangle(plot.Right + 4, plot.Bottom - (int)(plot.Height * i / 4.0) - 8, right - 6, 16), Theme.Red,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                float x = plot.Left + plot.Width * i / 6f;
+                DateTime t = agora.AddSeconds(-Capacity + Capacity * i / 6.0);
+                string txt = t.ToString("HH:mm:ss");
+                int tw = TextRenderer.MeasureText(g, txt, Theme.UiSmall).Width;
+                int tx = (int)x - tw / 2;
+                if (i == 0) tx = (int)x - 6;
+                if (i == 6) tx = (int)x - tw + 4;
+                if (i % 2 == 1 && plot.Width < 300) continue;   // estreito: metade das marcas
+                TextRenderer.DrawText(g, txt, Theme.UiSmall, new Rectangle(tx, plot.Bottom + 4, tw + 4, 16), Theme.Dim, C);
             }
 
-            DrawSeries(g, SeriesA, plot, max, Theme.Green);
-            DrawSeries(g, SeriesB, plot, max, Theme.Red);
-
-            if (SeriesA.Count > 0)
-            {
-                TextRenderer.DrawText(g, LabelA, Theme.UiBold, new Rectangle(plot.Left + 4, plot.Top + 2, 160, 16),
-                    Theme.Green, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                TextRenderer.DrawText(g, LabelB, Theme.UiBold, new Rectangle(plot.Right - 164, plot.Top + 2, 160, 16),
-                    Theme.Red, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            }
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            DrawSeries(g, a, plot, max, Theme.Cyan);
+            DrawSeries(g, b, plot, max, Theme.Teal);
+            g.SmoothingMode = SmoothingMode.None;
         }
 
-        private static void DrawSeries(Graphics g, List<double> data, Rectangle plot, double max, Color color)
+        private static int Legenda(Graphics g, string texto, Color cor, int x, int y)
+        {
+            int tw = TextRenderer.MeasureText(g, texto, Theme.UiSmall).Width;
+            Theme.DrawDot(g, x + 4, y + 10, 7, cor);
+            TextRenderer.DrawText(g, texto, Theme.UiSmall, new Rectangle(x + 12, y, tw + 4, 20),
+                Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            return x + 12 + tw;
+        }
+
+        private void DrawSeries(Graphics g, List<double> data, Rectangle plot, double max, Color color)
         {
             if (data.Count < 2) return;
             int n = data.Count;
+            // a serie encosta na direita (agora); com menos pontos que a janela, comeca no meio
+            float passo = plot.Width / (float)Math.Max(1, Capacity - 1);
+            float x0 = plot.Right - passo * (n - 1);
             PointF[] pts = new PointF[n];
             for (int i = 0; i < n; i++)
+                pts[i] = new PointF(x0 + passo * i, plot.Bottom - (float)(plot.Height * Math.Min(1.0, data[i] / max)));
+            PointF[] area = new PointF[n + 2];
+            Array.Copy(pts, area, n);
+            area[n] = new PointF(pts[n - 1].X, plot.Bottom);
+            area[n + 1] = new PointF(pts[0].X, plot.Bottom);
+            using (LinearGradientBrush fill = new LinearGradientBrush(new Rectangle(plot.X, plot.Y - 1, plot.Width, plot.Height + 2),
+                Color.FromArgb(90, color), Color.FromArgb(8, color), LinearGradientMode.Vertical))
+                g.FillPolygon(fill, area);
+            using (Pen core = new Pen(color, 1.8f))
             {
-                float x = plot.Left + (float)(plot.Width * i / (double)(n - 1));
-                float y = plot.Bottom - (float)(plot.Height * Math.Min(1.0, data[i] / max));
-                pts[i] = new PointF(x, y);
-            }
-            using (Pen glow = new Pen(Color.FromArgb(70, color), 5f))
-            using (Pen core = new Pen(color, 1.6f))
-            {
-                glow.LineJoin = LineJoin.Round;
                 core.LineJoin = LineJoin.Round;
-                g.DrawLines(glow, pts);
                 g.DrawLines(core, pts);
             }
         }
     }
 
-    /// <summary>
-    /// Tabela de sessoes desenhada a mao (sem scrollbar do sistema), com cabecalho
-    /// fixo, linhas alternadas, data de inicio/fim e selecao por clique.
-    /// </summary>
-    internal sealed class SessionTable : Control
+    /// <summary>Partes comuns das duas tabelas: cabecalho, linhas, rolagem e realce sob o mouse.</summary>
+    internal abstract class TabelaBase : Control
     {
-        public List<SessionRow> Rows = new List<SessionRow>();
-        public int RowHeight = 22;
-        public int SelectedPid;
-        public event Action SelectionChanged;
+        public int RowHeight = 24;
+        public const int HeaderH = 26;
+        protected int _scroll;
+        protected int _hover = -1;
+        protected const TextFormatFlags CellF = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
-        /// <summary>
-        /// Botao direito sobre uma linha: (pid da sessao, ponto em coordenadas
-        /// de tela) para o painel abrir o menu de contexto.
-        /// </summary>
-        public event Action<int, Point> ContextRequested;
-
-        private int _scroll;
-
-        /// <summary>Cabecalhos das colunas (vêm do dicionario de idioma).</summary>
-        private static string[] Headers()
-        {
-            return new string[]
-            {
-                Lang.T("colPid"), Lang.T("colScript"), Lang.T("colCaller"),
-                Lang.T("colCommands"), Lang.T("colLine"), Lang.T("colStart"), Lang.T("colEnd")
-            };
-        }
-
-        public SessionTable()
+        protected TabelaBase()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.PanelDeep;
+            BackColor = Theme.Panel;
         }
 
-        private const int HeaderH = 20;
+        protected abstract int Count { get; }
 
-        private int[] Columns(int total)
+        protected int Visiveis { get { return Math.Max(1, (Height - HeaderH) / RowHeight); } }
+
+        /// <summary>Cabecalho: rotulos apagados e a linha divisoria.</summary>
+        protected void Cabecalho(Graphics g, string[] titulos, int[] xs)
         {
-            int fixedW = 62 + 92 + 58 + 138 + 138;
-            int rest = Math.Max(160, total - fixedW - 12);
-            int script = (int)(rest * 0.48);
-            int caller = rest - script;
-            return new int[] { 62, script, caller, 92, 58, 138, 138 };
+            g.Clear(Theme.Panel);
+            using (Pen p = new Pen(Theme.Border))
+            {
+                g.DrawLine(p, 0, 0, Width, 0);
+                g.DrawLine(p, 0, HeaderH - 1, Width, HeaderH - 1);
+            }
+            for (int i = 0; i < titulos.Length; i++)
+                TextRenderer.DrawText(g, titulos[i], Theme.UiSmall,
+                    new Rectangle(xs[i], 0, Math.Max(10, xs[i + 1] - xs[i] - 8), HeaderH), Theme.Dim, CellF);
+            int vis = Visiveis;
+            if (_scroll > Count - vis) _scroll = Math.Max(0, Count - vis);
+            if (_scroll < 0) _scroll = 0;
         }
 
-        private static string Stamp(DateTime t)
+        protected void Rolagem(Graphics g)
         {
-            return t.ToString("dd/MM HH:mm:ss");
+            int vis = Visiveis;
+            if (Count <= vis) return;
+            int trackH = vis * RowHeight;
+            int barH = Math.Max(24, trackH * vis / Count);
+            int barY = HeaderH + (trackH - barH) * _scroll / Math.Max(1, Count - vis);
+            Theme.DrawScrollThumb(g, new Rectangle(Width - 6, barY, 4, barH), ScrollTheme.Thumb);
         }
+
+        protected void Separador(Graphics g, int y)
+        {
+            using (Pen p = new Pen(Theme.Grid)) g.DrawLine(p, 14, y, Width - 14, y);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int idx = e.Y >= HeaderH ? _scroll + (e.Y - HeaderH) / RowHeight : -1;
+            if (idx >= Count) idx = -1;
+            if (idx != _hover) { _hover = idx; Invalidate(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_hover != -1) { _hover = -1; Invalidate(); }
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            int max = Math.Max(0, Count - Visiveis);
+            _scroll -= e.Delta / 120;
+            if (_scroll > max) _scroll = max;
+            if (_scroll < 0) _scroll = 0;
+            Invalidate();
+        }
+
+        protected void Vazio(Graphics g, string texto)
+        {
+            TextRenderer.DrawText(g, texto, Theme.Ui, new Rectangle(0, HeaderH, Width, Math.Max(30, Height - HeaderH)), Theme.Dim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
+        /// <summary>Posicoes x das colunas: larguras fixas e a coluna flexivel (indice flex) fica com a sobra.</summary>
+        protected int[] Xs(int[] larguras, int flex, int x0)
+        {
+            int soma = 0;
+            foreach (int l in larguras) soma += l;
+            int[] w = (int[])larguras.Clone();
+            w[flex] += Math.Max(0, Width - x0 - 14 - soma);
+            int[] xs = new int[w.Length + 1];
+            xs[0] = x0;
+            for (int i = 0; i < w.Length; i++) xs[i + 1] = xs[i] + w[i];
+            return xs;
+        }
+    }
+
+    /// <summary>
+    /// Tabela de sessoes: script, pid, processo de origem, comandos, inicio e
+    /// a pilula de estado. Clique filtra o fluxo pela sessao; botao direito abre
+    /// o menu (Fechar).
+    /// </summary>
+    internal sealed class SessionTable : TabelaBase
+    {
+        public List<SessionRow> Rows = new List<SessionRow>();
+        public int SelectedPid;
+        public event Action SelectionChanged;
+        public event Action<int, Point> ContextRequested;
+
+        protected override int Count { get { return Rows.Count; } }
+
+        private static readonly int[] Larg = { 240, 90, 200, 90, 100, 110 };
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
+            int[] xs = Xs(Larg, 0, 30);
+            xs[0] = 30;
+            Cabecalho(g, new[] { Lang.T("v2ColScript"), Lang.T("v2ColPid"), Lang.T("v2ColOrigin"),
+                Lang.T("v2ColCmds"), Lang.T("v2ColStart"), Lang.T("v2ColStatus") }, xs);
+            if (Rows.Count == 0) { Vazio(g, Lang.T("v2NoSessions")); return; }
 
-            using (SolidBrush b = new SolidBrush(Theme.Panel))
-                g.FillRectangle(b, new Rectangle(0, 0, Width, HeaderH));
-            using (Pen p = new Pen(Theme.Grid))
-                g.DrawLine(p, 0, HeaderH - 1, Width, HeaderH - 1);
-
-            int[] w = Columns(Width);
-            string[] headers = Headers();
-            int x = 10;
-            for (int i = 0; i < headers.Length; i++)
-            {
-                TextRenderer.DrawText(g, headers[i], Theme.UiBold,
-                    new Rectangle(x, 0, w[i] - 6, HeaderH), Theme.Dim,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                x += w[i];
-            }
-
-            if (Rows.Count == 0)
-            {
-                TextRenderer.DrawText(g, Lang.T("noSessions"), Theme.Ui,
-                    new Rectangle(10, HeaderH + 10, Width - 20, 20), Theme.Dim,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                return;
-            }
-
-            int visible = Math.Max(1, (Height - HeaderH) / RowHeight);
-            if (_scroll > Rows.Count - visible) _scroll = Math.Max(0, Rows.Count - visible);
-            if (_scroll < 0) _scroll = 0;
-
-            for (int i = 0; i < visible && _scroll + i < Rows.Count; i++)
+            for (int i = 0; i < Visiveis && _scroll + i < Rows.Count; i++)
             {
                 SessionRow r = Rows[_scroll + i];
                 int y = HeaderH + i * RowHeight;
-                Rectangle b = new Rectangle(0, y, Width, RowHeight);
-
-                bool focused = r.Pid == SelectedPid;
-                using (SolidBrush br = new SolidBrush(focused ? Color.FromArgb(28, Theme.Cyan)
-                                                              : (i % 2 == 0 ? Theme.PanelDeep : Theme.Panel)))
-                    g.FillRectangle(br, b);
-
-                Color state = r.Closed ? Theme.Red : Theme.Green;
-                using (SolidBrush br = new SolidBrush(focused ? Theme.Cyan : Color.FromArgb(180, state)))
-                    g.FillRectangle(br, new Rectangle(2, y + 3, 3, RowHeight - 6));
-                using (SolidBrush br = new SolidBrush(focused ? Color.FromArgb(120, Theme.Cyan) : Color.FromArgb(55, state)))
-                    g.FillRectangle(br, new Rectangle(0, y + RowHeight - 2, Width, 2));
-
-                string[] cells =
+                bool sel = r.Pid == SelectedPid;
+                if (sel)
                 {
-                    r.Pid.ToString(), r.Script, r.Caller,
-                    r.Steps.ToString(), r.LastLine > 0 ? r.LastLine.ToString() : "-",
-                    Stamp(r.StartedAt),
-                    r.Closed ? Stamp(r.ClosedAt) : Lang.T("inProgress")
-                };
-
-                int cx = 10;
-                for (int c = 0; c < cells.Length; c++)
-                {
-                    Color color = Theme.Text;
-                    if (c == 0) color = Theme.Dim;
-                    else if (c == 3) color = r.Steps > 0 ? Theme.Green : Theme.Dim;
-                    else if (c == 4) color = r.LastLine > 0 ? Theme.Cyan : Theme.Dim;
-                    else if (c == 5) color = Theme.Dim;
-                    else if (c == 6) color = r.Closed ? Theme.Dim : Theme.Amber;
-
-                    TextRenderer.DrawText(g, cells[c], Theme.MonoSmall,
-                        new Rectangle(cx, y, Math.Max(10, w[c] - 6), RowHeight), color,
-                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                        TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    cx += w[c];
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(22, Theme.Teal)))
+                        g.FillRectangle(b, 4, y + 1, Width - 8, RowHeight - 2);
+                    Theme.DrawPanel(g, new Rectangle(4, y + 3, 3, RowHeight - 6), 1, Theme.Teal, Color.Empty);
                 }
+                else if ((_scroll + i) == _hover)
+                    using (SolidBrush b = new SolidBrush(Theme.Hover)) g.FillRectangle(b, 4, y + 1, Width - 8, RowHeight - 2);
+                if (i > 0 && !sel) Separador(g, y);
 
-                if (focused)
-                    TextRenderer.DrawText(g, Lang.T("focus"), Theme.UiBold,
-                        new Rectangle(Width - 56, y, 50, RowHeight), Theme.Cyan,
-                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            }
+                Theme.DrawDot(g, 18, y + RowHeight / 2, 7, r.Closed ? Theme.Gray : Theme.Green);
+                string[] cells = { r.Script, r.Pid.ToString(), r.Caller, r.Steps.ToString(), r.StartedAt.ToString("HH:mm:ss") };
+                for (int c = 0; c < cells.Length; c++)
+                    TextRenderer.DrawText(g, cells[c], c == 0 ? Theme.UiBold : Theme.Ui,
+                        new Rectangle(xs[c], y, Math.Max(10, xs[c + 1] - xs[c] - 8), RowHeight),
+                        c == 0 ? Theme.Text : (c == 2 ? Theme.Text : Theme.Dim), CellF);
 
-            if (Rows.Count > visible)
-            {
-                int trackH = visible * RowHeight;
-                int barH = Math.Max(28, trackH * visible / Rows.Count);
-                int barY = HeaderH + (trackH - barH) * _scroll / Math.Max(1, Rows.Count - visible);
-                Theme.DrawScrollThumb(g, new Rectangle(Width - 6, barY, 4, barH), ScrollTheme.Thumb);
+                string st = r.Closed ? Lang.T("v2Ended") : Lang.T("v2Running");
+                int pw = TextRenderer.MeasureText(st, Theme.UiSmall).Width + 18;
+                Theme.DrawPill(g, new Rectangle(xs[5], y + (RowHeight - 18) / 2, pw, 18), st, r.Closed ? Theme.Gray : Theme.Green, !r.Closed);
             }
+            Rolagem(g);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Cursor = _hover >= 0 ? Cursors.Hand : Cursors.Default;
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -815,8 +978,6 @@ namespace CmdWatch.Gui
             base.OnMouseDown(e);
             int idx = (e.Y - HeaderH) / RowHeight;
             bool onRow = e.Y >= HeaderH && idx >= 0 && _scroll + idx < Rows.Count;
-
-            // botao direito: menu de contexto da sessao (nao mexe no filtro)
             if (e.Button == MouseButtons.Right)
             {
                 if (onRow && ContextRequested != null)
@@ -824,17 +985,12 @@ namespace CmdWatch.Gui
                 return;
             }
             if (e.Button != MouseButtons.Left) return;
-
-            if (!onRow)
-            {
-                SetSelection(0);
-                return;
-            }
+            if (!onRow) { SetSelection(0); return; }
             int pid = Rows[_scroll + idx].Pid;
             SetSelection(pid == SelectedPid ? 0 : pid);
         }
 
-        private void SetSelection(int pid)
+        public void SetSelection(int pid)
         {
             if (SelectedPid == pid) return;
             SelectedPid = pid;
@@ -844,188 +1000,47 @@ namespace CmdWatch.Gui
     }
 
     /// <summary>
-    /// Tabela de janelas visiveis: titulo, autor (quem esta por tras da
-    /// janela), processo, inicio, duracao, quantas vezes ganhou o foco e o
-    /// estado atual. Desenhada a mao, como a tabela de sessoes.
+    /// Tabela de janelas: processo autor (com o ponto de estado), titulo/caminho
+    /// da janela em fonte monoespacada, processo de origem, duracao e estado.
     /// </summary>
-    internal sealed class WindowTable : Control
+    internal sealed class WindowTable : TabelaBase
     {
         public List<WindowRow> Rows = new List<WindowRow>();
-        public int RowHeight = 22;
+        protected override int Count { get { return Rows.Count; } }
 
-        private int _scroll;
-
-        public WindowTable()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.PanelDeep;
-        }
-
-        private const int HeaderH = 20;
-
-        // colunas: janela, autor, comando, inicio, duracao, foco, estado
-        private static readonly string[] Titulos =
-        {
-            "colWindow", "colAuthor", "fCommand", "colStart", "colDuration", "colFocus", "colState"
-        };
-
-        private static readonly int[] Minimos = { 110, 96, 150, 112, 72, 44, 74 };
-
-        private List<KeyValuePair<string, int>> _colunas = new List<KeyValuePair<string, int>>();
-
-        /// <summary>
-        /// Monta as colunas que cabem na largura. Quando a coluna e estreita (o
-        /// painel divide a tela com o fluxo), as opcionais saem primeiro: o
-        /// titulo e o autor nunca podem faltar - sao a informacao principal.
-        /// </summary>
-        private void MontarColunas(int total)
-        {
-            bool[] usar = new bool[Titulos.Length];
-            for (int i = 0; i < usar.Length; i++) usar[i] = true;
-
-            int soma = 0;
-            for (int i = 0; i < usar.Length; i++) soma += Minimos[i];
-
-            // ordem em que as colunas opcionais saem quando nao cabe
-            int[] ordem = { 2, 3, 5, 4, 6 };
-            for (int i = 0; i < ordem.Length && soma > total; i++)
-            {
-                usar[ordem[i]] = false;
-                soma -= Minimos[ordem[i]];
-            }
-
-            var lista = new List<KeyValuePair<string, int>>();
-            int sobra = Math.Max(0, total - soma - 10);
-            int titulo = sobra / 2;
-            int autor = sobra - titulo;
-
-            for (int i = 0; i < usar.Length; i++)
-            {
-                if (!usar[i]) continue;
-                int w = Minimos[i];
-                if (i == 0) w += titulo;
-                else if (i == 1) w += autor;
-                lista.Add(new KeyValuePair<string, int>(Titulos[i], w));
-            }
-            _colunas = lista;
-        }
-
-        private static string Stamp(DateTime t)
-        {
-            return t.ToString("dd/MM HH:mm:ss");
-        }
+        private static readonly int[] Larg = { 150, 300, 200, 90, 110 };
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.None;
-            MontarColunas(Width);
+            int[] xs = Xs(Larg, 1, 30);
+            Cabecalho(g, new[] { Lang.T("v2ColProc"), Lang.T("v2ColPath"), Lang.T("v2ColOrigin"),
+                Lang.T("v2ColDur"), Lang.T("v2ColStatus") }, xs);
+            if (Rows.Count == 0) { Vazio(g, Lang.T("v2NoWindows")); return; }
 
-            using (SolidBrush b = new SolidBrush(Theme.Panel))
-                g.FillRectangle(b, new Rectangle(0, 0, Width, HeaderH));
-            using (Pen p = new Pen(Theme.Grid))
-                g.DrawLine(p, 0, HeaderH - 1, Width, HeaderH - 1);
-
-            int x = 10;
-            foreach (KeyValuePair<string, int> col in _colunas)
-            {
-                TextRenderer.DrawText(g, Lang.T(col.Key), Theme.UiBold,
-                    new Rectangle(x, 0, col.Value - 6, HeaderH), Theme.Dim,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                x += col.Value;
-            }
-
-            if (Rows.Count == 0)
-            {
-                TextRenderer.DrawText(g, Lang.T("noWindows"), Theme.Ui,
-                    new Rectangle(10, HeaderH + 10, Width - 20, 20), Theme.Dim,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-                return;
-            }
-
-            int visiveis = Math.Max(1, (Height - HeaderH) / RowHeight);
-            if (_scroll > Rows.Count - visiveis) _scroll = Math.Max(0, Rows.Count - visiveis);
-            if (_scroll < 0) _scroll = 0;
-
-            for (int i = 0; i < visiveis && _scroll + i < Rows.Count; i++)
+            for (int i = 0; i < Visiveis && _scroll + i < Rows.Count; i++)
             {
                 WindowRow r = Rows[_scroll + i];
                 int y = HeaderH + i * RowHeight;
-                Rectangle b = new Rectangle(0, y, Width, RowHeight);
+                if ((_scroll + i) == _hover)
+                    using (SolidBrush b = new SolidBrush(Theme.Hover)) g.FillRectangle(b, 4, y + 1, Width - 8, RowHeight - 2);
+                else if (i > 0) Separador(g, y);
 
-                Color estado = r.Closed ? Theme.Red : (r.Visible ? Theme.Green : Theme.Amber);
-                using (SolidBrush br = new SolidBrush(i % 2 == 0 ? Theme.PanelDeep : Theme.Panel))
-                    g.FillRectangle(br, b);
-                using (SolidBrush br = new SolidBrush(Color.FromArgb(180, estado)))
-                    g.FillRectangle(br, new Rectangle(2, y + 3, 3, RowHeight - 6));
+                Color estado = r.Closed ? Theme.Gray : (r.Visible ? Theme.Green : Theme.Gray);
+                Theme.DrawDot(g, 18, y + RowHeight / 2, 7, r.Closed ? Theme.Gray : (r.Visible ? Theme.Green : Theme.Amber));
+                string nome = r.AuthorName.Length > 0 ? r.AuthorName : "?";
+                string titulo = r.Title.Length > 0 ? r.Title : Lang.T("fNoTitle");
+                TextRenderer.DrawText(g, nome, Theme.UiBold, new Rectangle(xs[0], y, xs[1] - xs[0] - 8, RowHeight), Theme.Text, CellF);
+                TextRenderer.DrawText(g, titulo, Theme.MonoSmall, new Rectangle(xs[1], y, xs[2] - xs[1] - 8, RowHeight), Theme.Text, CellF);
+                TextRenderer.DrawText(g, r.Origin, Theme.Ui, new Rectangle(xs[2], y, xs[3] - xs[2] - 8, RowHeight),
+                    Theme.Text, CellF);
+                TextRenderer.DrawText(g, r.DuracaoSeg.ToString("0.0") + " s", Theme.Ui, new Rectangle(xs[3], y, xs[4] - xs[3] - 8, RowHeight), Theme.Dim, CellF);
 
-                var cells = new List<string>();
-                var cores = new List<Color>();
-                foreach (KeyValuePair<string, int> col in _colunas)
-                {
-                    switch (col.Key)
-                    {
-                        case "colWindow":
-                            cells.Add(r.Title.Length > 0 ? r.Title : Lang.T("fNoTitle"));
-                            cores.Add(Theme.Text);
-                            break;
-                        case "colAuthor":
-                            cells.Add(r.Author);
-                            cores.Add(r.ByConsole ? Theme.Amber : Theme.Cyan);
-                            break;
-                        case "fCommand":
-                            cells.Add(r.CmdLine);
-                            cores.Add(Theme.Dim);
-                            break;
-                        case "colStart":
-                            cells.Add(Stamp(r.StartedAt));
-                            cores.Add(Theme.Dim);
-                            break;
-                        case "colDuration":
-                            cells.Add(r.DuracaoSeg.ToString("0.0") + "s");
-                            cores.Add(Theme.Text);
-                            break;
-                        case "colFocus":
-                            cells.Add(r.Focus > 0 ? r.Focus.ToString() : "-");
-                            cores.Add(r.Focus > 0 ? Theme.Green : Theme.Dim);
-                            break;
-                        default:
-                            cells.Add(r.Estado);
-                            cores.Add(estado);
-                            break;
-                    }
-                }
-
-                int cx = 10;
-                for (int c = 0; c < cells.Count && c < _colunas.Count; c++)
-                {
-                    TextRenderer.DrawText(g, cells[c], Theme.MonoSmall,
-                        new Rectangle(cx, y, Math.Max(10, _colunas[c].Value - 6), RowHeight), cores[c],
-                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                        TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-                    cx += _colunas[c].Value;
-                }
+                string st = r.Closed ? Lang.T("v2WinClosed") : (r.Visible ? Lang.T("v2WinVisible") : Lang.T("v2WinHidden"));
+                int pw = Math.Max(70, TextRenderer.MeasureText(st, Theme.UiSmall).Width + 18);
+                Theme.DrawPill(g, new Rectangle(xs[4], y + (RowHeight - 18) / 2, pw, 18), st, estado, !r.Closed && r.Visible);
             }
-
-            if (Rows.Count > visiveis)
-            {
-                int trackH = visiveis * RowHeight;
-                int barH = Math.Max(28, trackH * visiveis / Rows.Count);
-                int barY = HeaderH + (trackH - barH) * _scroll / Math.Max(1, Rows.Count - visiveis);
-                Theme.DrawScrollThumb(g, new Rectangle(Width - 6, barY, 4, barH), ScrollTheme.Thumb);
-            }
-        }
-
-        protected override void OnMouseWheel(MouseEventArgs e)
-        {
-            base.OnMouseWheel(e);
-            int visiveis = Math.Max(1, (Height - HeaderH) / RowHeight);
-            int max = Math.Max(0, Rows.Count - visiveis);
-            _scroll -= e.Delta / 120;
-            if (_scroll > max) _scroll = max;
-            if (_scroll < 0) _scroll = 0;
-            Invalidate();
+            Rolagem(g);
         }
     }
 }

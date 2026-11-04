@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.1.1";
+        internal const string Version = "1.1.0";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -24,6 +24,7 @@ namespace CmdWatch
 
             string cmd = args[0].ToLowerInvariant();
             var opts = Options.Parse(args.Skip(1).ToArray());
+            Mascara.Ativa = !opts.NoMask;
 
             // o painel e a unica saida sem console
             if (cmd == "gui" || cmd == "dashboard") return RunGui(opts);
@@ -73,7 +74,7 @@ opcoes do monitor (tambem valem para o gui):
   --log <arquivo>     arquivo JSONL de saida (padrao: cmdwatch-log.jsonl)
   --interval <ms>     intervalo de amostragem parado (padrao 500)
   --fast-interval <ms>  intervalo com script ativo (padrao 50)
-  --engine <auto|polling|wmi>  motor de captura (auto detecta)
+  --engine <auto|polling|wmi|etw>  motor (auto: etw com admin, polling sem)
   --duration <seg>    encerra apos N segundos (0 = infinito)
   --filter <texto>    so reporta .cmd cujo caminho contenha o texto
   --no-children       nao reporta os comandos internos do script
@@ -92,6 +93,7 @@ opcoes do trace:
   --args <texto>      argumentos passados ao script
   --json              saida em JSONL
   --raw               mostra toda a saida capturada (nao so os comandos)
+  --no-mask           nao mascara segredos (senha, token...) nas linhas de comando
 ");
         }
 
@@ -99,20 +101,9 @@ opcoes do trace:
         private static int RunMonitor(Options o)
         {
             bool admin = IsAdmin();
-            string engine = o.Engine;
-            if (engine == "auto") engine = admin ? "wmi" : "polling";
-
-            IEngine eng;
-            if (engine == "wmi")
-            {
-                if (!admin)
-                {
-                    Console.Error.WriteLine("[!] motor wmi exige administrador; usando 'polling'.");
-                    engine = "polling";
-                }
-            }
-            if (engine == "wmi") eng = new WmiEngine();
-            else eng = new PollingEngine(o.Interval);
+            string engine, aviso;
+            IEngine eng = EngineFactory.Criar(o.Engine, o.Interval, admin, out engine, out aviso);
+            if (aviso.Length > 0) Console.Error.WriteLine("[!] " + aviso);
 
             var watcher = new Watcher { Filter = o.Filter, TrackChildren = o.NoChildren == false, Verbose = o.Verbose };
             watcher.IntervaloLentoMs = o.Interval;
@@ -188,8 +179,7 @@ opcoes do trace:
             }
             else
             {
-                var we = (WmiEngine)eng;
-                we.Start(watcher.OnProcessStart, watcher.OnProcessExit);
+                eng.Start(watcher.OnProcessStart, watcher.OnProcessExit);   // wmi ou etw: so a interface
             }
 
             DateTime deadline = o.Duration > 0 ? DateTime.Now.AddSeconds(o.Duration) : DateTime.MaxValue;
@@ -232,7 +222,7 @@ opcoes do trace:
                 for (int i = 0; i < real.Count; i++)
                 {
                     if (i > 0) sb.Append(",");
-                    sb.Append("{\"line\":" + J.Num(real[i].Line) + ",\"raw\":" + J.Str(real[i].Raw) + ",\"meaning\":" + J.Str(real[i].Meaning) + "}");
+                    sb.Append("{\"line\":" + J.Num(real[i].Line) + ",\"raw\":" + J.Str(Mascara.Aplicar(real[i].Raw)) + ",\"meaning\":" + J.Str(Mascara.Aplicar(real[i].Meaning)) + "}");
                 }
                 sb.Append("]}");
                 Console.WriteLine(sb.ToString());
@@ -253,7 +243,7 @@ opcoes do trace:
                 if (s.IsComment) continue;
                 if (s.IsLabel) { WriteDim("  linha " + Pad(s.Line) + "  [" + s.Label + "]"); continue; }
                 Console.WriteLine("  linha " + Pad(s.Line) + "  " + s.Raw);
-                WriteDim("               -> " + s.Meaning);
+                WriteDim("               -> " + Mascara.Aplicar(s.Meaning));
             }
             Console.WriteLine();
             return 0;
@@ -345,14 +335,14 @@ opcoes do trace:
 
                 if (o.Json)
                 {
-                    outLines.Add("{\"ts\":" + J.Ts(kv.Key) + ",\"n\":" + J.Num(stepNo) + ",\"cmd\":" + J.Str(cmdText) +
+                    outLines.Add("{\"ts\":" + J.Ts(kv.Key) + ",\"n\":" + J.Num(stepNo) + ",\"cmd\":" + J.Str(Mascara.Aplicar(cmdText)) +
                                  (step != null && conf >= 1.5 ? ",\"line\":" + J.Num(step.Line) : "") +
-                                 ",\"meaning\":" + J.Str(meaning) + "}");
+                                 ",\"meaning\":" + J.Str(Mascara.Aplicar(meaning)) + "}");
                 }
                 else
                 {
                     Console.WriteLine("[" + (kv.Key - t0).TotalSeconds.ToString("0.00") + "s] " + cmdText);
-                    WriteDim("          -> " + meaning);
+                    WriteDim("          -> " + Mascara.Aplicar(meaning));
                 }
             }
 
@@ -438,8 +428,8 @@ opcoes do trace:
                 sb.Append(",\"cmdPid\":" + J.Num(s.CmdPid));
                 sb.Append(",\"script\":" + J.Str(s.ScriptPath));
                 sb.Append(",\"scriptName\":" + J.Str(s.ScriptName));
-                sb.Append(",\"args\":" + J.Str(s.ScriptArgs));
-                sb.Append(",\"cmdLine\":" + J.Str(s.RawCmdLine));
+                sb.Append(",\"args\":" + J.Str(Mascara.Aplicar(s.ScriptArgs)));
+                sb.Append(",\"cmdLine\":" + J.Str(Mascara.Aplicar(s.RawCmdLine)));
                 sb.Append(",\"startedAt\":" + J.Ts(s.StartedAt));
                 sb.Append(",\"durationMs\":" + J.Num((long)(ev.Timestamp - s.StartedAt).TotalMilliseconds));
                 sb.Append(",\"lastLine\":" + J.Num(s.LastLine));
@@ -450,7 +440,7 @@ opcoes do trace:
                     sb.Append(",\"caller\":{");
                     sb.Append("\"pid\":" + J.Num(s.Caller.Pid) + ",");
                     sb.Append("\"name\":" + J.Str(s.Caller.Name) + ",");
-                    sb.Append("\"cmdLine\":" + J.Str(s.Caller.CmdLine) + ",");
+                    sb.Append("\"cmdLine\":" + J.Str(Mascara.Aplicar(s.Caller.CmdLine)) + ",");
                     sb.Append("\"path\":" + J.Str(s.Caller.Path) + ",");
                     sb.Append("\"sessionId\":" + J.Num(s.Caller.SessionId) + ",");
                     sb.Append("\"description\":" + J.Str(CallerDesc.Describe(s.Caller)));
@@ -464,7 +454,7 @@ opcoes do trace:
                     for (int i = 0; i < s.Chain.Count; i++)
                     {
                         if (i > 0) sb.Append(",");
-                        sb.Append("{\"pid\":" + J.Num(s.Chain[i].Pid) + ",\"name\":" + J.Str(s.Chain[i].Name) + ",\"cmdLine\":" + J.Str(s.Chain[i].CmdLine) + "}");
+                        sb.Append("{\"pid\":" + J.Num(s.Chain[i].Pid) + ",\"name\":" + J.Str(s.Chain[i].Name) + ",\"cmdLine\":" + J.Str(Mascara.Aplicar(s.Chain[i].CmdLine)) + "}");
                     }
                     sb.Append("]");
                 }
@@ -482,7 +472,7 @@ opcoes do trace:
                 sb.Append("\"pid\":" + J.Num(ev.Process.Pid) + ",");
                 sb.Append("\"ppid\":" + J.Num(ev.Process.ParentPid) + ",");
                 sb.Append("\"name\":" + J.Str(ev.Process.Name) + ",");
-                sb.Append("\"cmdLine\":" + J.Str(ev.Process.CmdLine) + "}");
+                sb.Append("\"cmdLine\":" + J.Str(Mascara.Aplicar(ev.Process.CmdLine)) + "}");
             }
             if (ev.Frame != null)
             {
@@ -494,21 +484,21 @@ opcoes do trace:
             }
             if (ev.Step != null)
             {
-                sb.Append(",\"step\":{\"line\":" + J.Num(ev.Step.Line) + ",\"raw\":" + J.Str(ev.Step.Raw) + ",\"meaning\":" + J.Str(ev.Step.Meaning) + "}");
+                sb.Append(",\"step\":{\"line\":" + J.Num(ev.Step.Line) + ",\"raw\":" + J.Str(Mascara.Aplicar(ev.Step.Raw)) + ",\"meaning\":" + J.Str(Mascara.Aplicar(ev.Step.Meaning)) + "}");
             }
             if (ev.Window != null)
             {
                 WindowRecord w = ev.Window;
                 sb.Append(",\"window\":{");
                 sb.Append("\"hwnd\":" + J.Str("0x" + w.Hwnd.ToInt64().ToString("X")) + ",");
-                sb.Append("\"title\":" + J.Str(w.Title) + ",");
+                sb.Append("\"title\":" + J.Str(Mascara.Aplicar(w.Title)) + ",");
                 sb.Append("\"class\":" + J.Str(w.ClassName) + ",");
                 sb.Append("\"ownerPid\":" + J.Num(w.OwnerPid) + ",");
                 sb.Append("\"owner\":" + J.Str(w.OwnerName) + ",");
-                sb.Append("\"ownerCmdLine\":" + J.Str(w.OwnerCmdLine) + ",");
+                sb.Append("\"ownerCmdLine\":" + J.Str(Mascara.Aplicar(w.OwnerCmdLine)) + ",");
                 sb.Append("\"authorPid\":" + J.Num(w.AuthorPid) + ",");
                 sb.Append("\"author\":" + J.Str(w.AuthorName) + ",");
-                sb.Append("\"authorCmdLine\":" + J.Str(w.AuthorCmdLine) + ",");
+                sb.Append("\"authorCmdLine\":" + J.Str(Mascara.Aplicar(w.AuthorCmdLine)) + ",");
                 sb.Append("\"programPid\":" + J.Num(w.ProgramPid) + ",");
                 sb.Append("\"program\":" + J.Str(w.ProgramName) + ",");
                 sb.Append("\"byConsole\":" + (w.AutorPeloConsole ? "true" : "false") + ",");
@@ -527,7 +517,7 @@ opcoes do trace:
                         if (i > 0) sb.Append(",");
                         sb.Append("{\"pid\":" + J.Num(w.Chain[i].Pid)
                             + ",\"name\":" + J.Str(w.Chain[i].Name)
-                            + ",\"cmdLine\":" + J.Str(w.Chain[i].CmdLine)
+                            + ",\"cmdLine\":" + J.Str(Mascara.Aplicar(w.Chain[i].CmdLine))
                             + ",\"sessionId\":" + J.Num(w.Chain[i].SessionId) + "}");
                     }
                     sb.Append("]");
@@ -553,6 +543,7 @@ opcoes do trace:
         public bool Quiet = false;
         public bool Verbose = false;
         public bool Raw = false;
+        public bool NoMask = false;
         public string Args = "";
 
         public static Options Parse(string[] argv)
@@ -575,6 +566,7 @@ opcoes do trace:
                     case "--quiet": o.Quiet = true; break;
                     case "--verbose": o.Verbose = true; break;
                     case "--raw": o.Raw = true; break;
+                case "--no-mask": o.NoMask = true; break;
                     case "--args": if (i + 1 < argv.Length) o.Args = argv[++i]; break;
                     default: break;
                 }

@@ -32,6 +32,18 @@ namespace CmdWatch
     internal static class ProcessControl
     {
         private const uint PROCESS_TERMINATE = 0x0001;
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetProcessTimes(IntPtr h,
+            out System.Runtime.InteropServices.ComTypes.FILETIME criacao,
+            out System.Runtime.InteropServices.ComTypes.FILETIME saida,
+            out System.Runtime.InteropServices.ComTypes.FILETIME kernel,
+            out System.Runtime.InteropServices.ComTypes.FILETIME usuario);
+
+        /// <summary>Diferenca maxima aceita entre a hora registrada e a real.</summary>
+        private static readonly TimeSpan Tolerancia = TimeSpan.FromSeconds(1);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint desiredAccess,
@@ -54,6 +66,18 @@ namespace CmdWatch
         /// </summary>
         public static TerminateResult Terminate(int pid, bool includeChildren)
         {
+            return Terminate(pid, includeChildren, DateTime.MinValue);
+        }
+
+        /// <summary>
+        /// Igual, mas so encerra se o processo com esse pid nasceu na hora
+        /// registrada (<paramref name="inicioRegistrado"/>): um pid
+        /// reaproveitado por outro processo nao e tocado. Os filhos tambem sao
+        /// conferidos com a hora lida no retrato. DateTime.MinValue = hora
+        /// desconhecida (sem conferencia, como antes).
+        /// </summary>
+        public static TerminateResult Terminate(int pid, bool includeChildren, DateTime inicioRegistrado)
+        {
             TerminateResult res = new TerminateResult();
             res.Pid = pid;
             if (pid <= 0)
@@ -62,42 +86,79 @@ namespace CmdWatch
                 return res;
             }
 
+            // o alvo primeiro: se o pid ja e de outro processo, nada e encerrado
+            // (nem os "filhos" desse outro processo)
+            if (inicioRegistrado != DateTime.MinValue)
+            {
+                DateTime real;
+                if (LerInicio(pid, out real) && Math.Abs((real - inicioRegistrado).TotalMilliseconds) > Tolerancia.TotalMilliseconds)
+                {
+                    res.AlreadyGone = true;
+                    res.Error = "o pid " + pid + " agora e de outro processo (iniciado " + real.ToString("HH:mm:ss") +
+                                "); nada foi encerrado";
+                    return res;
+                }
+            }
+
+            Dictionary<int, DateTime> inicios = new Dictionary<int, DateTime>();
             List<int> ordem = new List<int>();
             if (includeChildren)
             {
-                List<int> filhos = Descendants(pid);
+                List<int> filhos = Descendants(pid, inicios);
                 for (int i = 0; i < filhos.Count; i++) ordem.Add(filhos[i]);
             }
             ordem.Add(pid);
+            inicios[pid] = inicioRegistrado;
 
             bool erroPrincipal = false;
             for (int i = 0; i < ordem.Count; i++)
             {
                 int alvo = ordem[i];
-                bool ok = TryKill(alvo, out bool jaMorreu, out string erro);
+                DateTime esperado;
+                if (!inicios.TryGetValue(alvo, out esperado)) esperado = DateTime.MinValue;
+                bool ok = TryKill(alvo, esperado, out bool jaMorreu, out string erro);
                 if (ok) { res.Killed++; continue; }
 
                 if (alvo == pid)
                 {
-                    if (jaMorreu) { res.AlreadyGone = true; continue; }
+                    if (jaMorreu) { res.AlreadyGone = true; if (erro.Length > 0) res.Error = erro; continue; }
                     res.Error = erro;
                     erroPrincipal = true;
                 }
                 // falha em um filho nao impede o encerramento do processo principal
             }
 
-            res.Ok = !erroPrincipal && res.Killed > 0;
-            if (res.AlreadyGone && res.Error.Length == 0) res.Ok = false;
+            res.Ok = !erroPrincipal && !res.AlreadyGone && res.Killed > 0;
             return res;
         }
 
+        /// <summary>Hora de inicio real do processo (falso se ele nao existe).</summary>
+        private static bool LerInicio(int pid, out DateTime inicio)
+        {
+            inicio = DateTime.MinValue;
+            IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (h == IntPtr.Zero) return false;
+            try { return LerInicio(h, out inicio); }
+            finally { try { CloseHandle(h); } catch { } }
+        }
+
+        private static bool LerInicio(IntPtr h, out DateTime inicio)
+        {
+            inicio = DateTime.MinValue;
+            System.Runtime.InteropServices.ComTypes.FILETIME ct, et, kt, ut;
+            if (!GetProcessTimes(h, out ct, out et, out kt, out ut)) return false;
+            long ft = ((long)ct.dwHighDateTime << 32) | (uint)ct.dwLowDateTime;
+            inicio = DateTime.FromFileTimeUtc(ft).ToLocalTime();
+            return true;
+        }
+
         /// <summary>Encerra um unico processo (sem tocar nos filhos).</summary>
-        private static bool TryKill(int pid, out bool jaMorreu, out string erro)
+        private static bool TryKill(int pid, DateTime esperado, out bool jaMorreu, out string erro)
         {
             jaMorreu = false;
             erro = "";
 
-            IntPtr h = OpenProcess(PROCESS_TERMINATE, false, pid);
+            IntPtr h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             if (h == IntPtr.Zero)
             {
                 int err = Marshal.GetLastWin32Error();
@@ -113,6 +174,16 @@ namespace CmdWatch
 
             try
             {
+                // confere no MESMO handle que vai encerrar: sem janela entre a
+                // conferencia e o TerminateProcess para o pid trocar de dono
+                DateTime real;
+                if (esperado != DateTime.MinValue && LerInicio(h, out real)
+                    && Math.Abs((real - esperado).TotalMilliseconds) > Tolerancia.TotalMilliseconds)
+                {
+                    jaMorreu = true;
+                    erro = "pid reaproveitado por outro processo; nao encerrado";
+                    return false;
+                }
                 bool ok = TerminateProcess(h, 1);
                 if (!ok)
                 {
@@ -134,7 +205,7 @@ namespace CmdWatch
         /// Descendentes do processo (filhos, netos, bisnetos) em ordem de
         /// profundidade decrescente - os mais filhos primeiro.
         /// </summary>
-        private static List<int> Descendants(int root)
+        private static List<int> Descendants(int root, Dictionary<int, DateTime> iniciosSaida)
         {
             List<int> resultado = new List<int>();
             try
@@ -142,6 +213,11 @@ namespace CmdWatch
                 List<ProcInfo> todos = NativeProcess.Snapshot();
                 if (todos == null || todos.Count == 0) return resultado;
 
+                // hora de inicio de cada pid: um processo so e filho de verdade se
+                // nasceu depois do pai. Sem isso, um orfao cujo pai antigo morreu e
+                // teve o pid reaproveitado pelo alvo seria encerrado junto.
+                Dictionary<int, DateTime> inicio = new Dictionary<int, DateTime>();
+                for (int i = 0; i < todos.Count; i++) inicio[todos[i].Pid] = todos[i].StartedAt;
                 Dictionary<int, List<int>> filhos = new Dictionary<int, List<int>>();
                 for (int i = 0; i < todos.Count; i++)
                 {
@@ -169,6 +245,10 @@ namespace CmdWatch
                     {
                         int c = cs[i];
                         if (profundidade.ContainsKey(c)) continue;   // evita ciclo
+                        DateTime ti, tp;
+                        if (inicio.TryGetValue(c, out ti) && inicio.TryGetValue(atual, out tp)
+                            && ti != DateTime.MinValue && tp != DateTime.MinValue && ti < tp)
+                            continue;   // pid do pai reaproveitado: nao e descendente
                         profundidade[c] = profundidade[atual] + 1;
                         fila.Enqueue(c);
                     }
@@ -178,6 +258,8 @@ namespace CmdWatch
                 {
                     if (kv.Key == root) continue;
                     resultado.Add(kv.Key);
+                    DateTime t;
+                    if (iniciosSaida != null && inicio.TryGetValue(kv.Key, out t)) iniciosSaida[kv.Key] = t;
                 }
 
                 // mais profundos primeiro: o filho morre antes do pai

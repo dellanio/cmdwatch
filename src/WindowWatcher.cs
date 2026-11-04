@@ -642,7 +642,14 @@ namespace CmdWatch
                         int pai = dados[atual].ParentPid;
                         if (pai <= 0) break;
                         if (!dados.ContainsKey(pai)) break;   // saiu do console
-                        if (pai == raiz) break;              // a raiz e o shell, nao o autor
+                        if (pai == raiz)
+                        {
+                            // a raiz so fica de fora quando e um shell. Quando a
+                            // raiz e um programa (python.exe abriu o console e
+                            // chamou git.exe), ela e quem chamou: e o autor.
+                            if (!EhShellDeComando(dados[raiz].Name)) autor = raiz;
+                            break;
+                        }
                         autor = pai;
                         atual = pai;
                     }
@@ -683,14 +690,100 @@ namespace CmdWatch
                 }
             }
 
-            // (3) janela normal: o proprio dono e o autor
+            // (3) janela de console sem resposta do console (no modo terminal a
+            //     ConsoleProbe nao roda). O dono e o programa que abriu o console
+            //     (git.exe chamado por um script python): o autor e quem o chamou,
+            //     o ancestral mais proximo que nao e shell, validado pela hora de
+            //     inicio. Mesma regra do caminho (1).
+            if (EhClasseConsole(rec.ClassName) && !EhShellDeComando(rec.OwnerName))
+            {
+                int chamador = ChamadorDe(rec.OwnerPid);
+                if (chamador > 0)
+                {
+                    rec.ProgramPid = rec.OwnerPid;
+                    rec.ProgramName = rec.OwnerName;
+                    AplicarAutor(rec, chamador);
+                    return;
+                }
+            }
+
+            // (4) janela normal: o proprio dono e o autor
             AplicarAutor(rec, rec.OwnerPid);
         }
+
+        private static bool EhClasseConsole(string cls)
+        {
+            return cls == "ConsoleWindowClass" || cls == "PseudoConsoleWindow";
+        }
+
+        /// <summary>
+        /// Quem chamou o programa: sobe pelos pais pulando shells de comando
+        /// (python -> cmd /c -> git) ate o primeiro que nao e shell. Cada pai so
+        /// vale se nasceu antes do filho (pid reaproveitado nao conta). Para em
+        /// processo do sistema/terminal: ai nao ha chamador (0).
+        /// </summary>
+        private int ChamadorDe(int pid)
+        {
+            ProcInfo atual = BuscarProc(pid);
+            for (int guarda = 0; atual != null && guarda < 4; guarda++)
+            {
+                if (atual.ParentPid <= 0) return 0;
+                ProcInfo pai = BuscarProc(atual.ParentPid);
+                if (pai == null || pai.Name.Length == 0) return 0;
+                if (pai.StartedAt != DateTime.MinValue && atual.StartedAt != DateTime.MinValue
+                    && pai.StartedAt > atual.StartedAt) return 0;
+                if (EhTerminalHost(pai.Name) || EhHospedeiroConsole(pai.Name) || EhSistema(pai.Name)) return 0;
+                if (!EhShellDeComando(pai.Name)) return pai.Pid;
+                atual = pai;
+            }
+            return 0;
+        }
+
+        private ProcInfo BuscarProc(int pid)
+        {
+            if (pid <= 0) return null;
+            ProcInfo pi = Processos != null ? Processos.Buscar(pid) : null;
+            if (pi != null && pi.Name.Length > 0) return pi;
+            ProcInfo dir;
+            if (NativeProcess.TryGetProcessInfo(pid, out dir) && dir != null && dir.Name.Length > 0) return dir;
+            return null;
+        }
+
+        private static bool EhSistema(string nome)
+        {
+            foreach (string s in ProcessosDoSistema)
+                if (nome.Equals(s, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        private static readonly string[] ProcessosDoSistema =
+        {
+            "explorer.exe", "svchost.exe", "services.exe", "wininit.exe", "winlogon.exe",
+            "userinit.exe", "sihost.exe", "taskhostw.exe", "taskeng.exe", "smss.exe", "csrss.exe"
+        };
 
         /// <summary>
         /// Processos que costumam ter um console e lancar programas dentro
         /// dele. So para eles a arvore de filhos serve para descobrir o autor.
         /// </summary>
+        /// <summary>
+        /// Shell de comando de verdade (o "prompt"). Diferente de EhShell, que
+        /// inclui interpretadores (python, node...) para achar filhos: aqui o
+        /// python que abriu o console e chamou git.exe conta como autor.
+        /// </summary>
+        private static bool EhShellDeComando(string nome)
+        {
+            if (string.IsNullOrEmpty(nome)) return false;
+            foreach (string s in ShellsDeComando)
+                if (nome.Equals(s, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        private static readonly string[] ShellsDeComando =
+        {
+            "cmd.exe", "powershell.exe", "pwsh.exe", "bash.exe", "sh.exe", "zsh.exe", "fish.exe", "wsl.exe", "nu.exe"
+        };
+
         private static bool EhShell(string nome)
         {
             if (string.IsNullOrEmpty(nome)) return false;
@@ -855,6 +948,19 @@ namespace CmdWatch
                         // fechada. Quem decide que uma janela fechou e o evento de
                         // destruicao - e IsWindow nao serve para isso aqui (medido:
                         // devolve falso para janela viva de outro processo).
+                        // Mas se a janela nao existe mais (a classe nao responde), o
+                        // evento de destruicao se perdeu: em rajada ele chega enquanto
+                        // a janela ainda esta sendo destruida e Fechar o ignora
+                        // (medido: 16 de 100 close). Fecha aqui, senao o registro
+                        // fica para sempre em _janelas.
+                        if (!vistas.Contains(kv.Key) && NomeDaClasse(kv.Key).Length == 0)
+                        {
+                            r.ClosedAt = DateTime.Now;
+                            r.Visible = false;
+                            if (!r.Auxiliar) Notificar(r, "close");
+                            _lixo.Add(kv.Key);
+                            continue;
+                        }
                         if (!vistas.Contains(kv.Key) && !r.Visible)
                         {
                             if (!r.HiddenAt.HasValue)
@@ -902,17 +1008,20 @@ namespace CmdWatch
                     WindowRecord cascadia = AcharCascadiaProxima(rec);
                     if (cascadia != null)
                     {
-                        rec.Auxiliar = true;
-                        rec.LinkedHwnd = cascadia.Hwnd;
-                        // Cascadia herda o autor real
-                        if (rec.AuthorPid > 0 &&
-                            (cascadia.AuthorPid == cascadia.OwnerPid ||
-                             EhTerminalHost(cascadia.AuthorName)))
+                        lock (_lock)
                         {
-                            cascadia.AuthorPid = rec.AuthorPid;
-                            cascadia.AuthorName = rec.AuthorName;
-                            cascadia.AuthorCmdLine = rec.AuthorCmdLine;
-                            cascadia.AutorPeloConsole = true;
+                            rec.Auxiliar = true;
+                            rec.LinkedHwnd = cascadia.Hwnd;
+                            // Cascadia herda o autor real
+                            if (rec.AuthorPid > 0 &&
+                                (cascadia.AuthorPid == cascadia.OwnerPid ||
+                                 EhTerminalHost(cascadia.AuthorName)))
+                            {
+                                cascadia.AuthorPid = rec.AuthorPid;
+                                cascadia.AuthorName = rec.AuthorName;
+                                cascadia.AuthorCmdLine = rec.AuthorCmdLine;
+                                cascadia.AutorPeloConsole = true;
+                            }
                         }
                     }
                     return;
@@ -923,14 +1032,17 @@ namespace CmdWatch
                     WindowRecord pseudo = AcharPseudoProxima(rec);
                     if (pseudo != null)
                     {
-                        pseudo.Auxiliar = true;
-                        pseudo.LinkedHwnd = rec.Hwnd;
-                        if (pseudo.AuthorPid > 0)
+                        lock (_lock)
                         {
-                            rec.AuthorPid = pseudo.AuthorPid;
-                            rec.AuthorName = pseudo.AuthorName;
-                            rec.AuthorCmdLine = pseudo.AuthorCmdLine;
-                            rec.AutorPeloConsole = true;
+                            pseudo.Auxiliar = true;
+                            pseudo.LinkedHwnd = rec.Hwnd;
+                            if (pseudo.AuthorPid > 0)
+                            {
+                                rec.AuthorPid = pseudo.AuthorPid;
+                                rec.AuthorName = pseudo.AuthorName;
+                                rec.AuthorCmdLine = pseudo.AuthorCmdLine;
+                                rec.AutorPeloConsole = true;
+                            }
                         }
                     }
                 }
@@ -946,11 +1058,15 @@ namespace CmdWatch
             {
                 if (!_janelas.TryGetValue(aux.LinkedHwnd, out alvo)) return;
             }
-            bool mudou = alvo.AuthorPid != aux.AuthorPid;
-            alvo.AuthorPid = aux.AuthorPid;
-            alvo.AuthorName = aux.AuthorName;
-            alvo.AuthorCmdLine = aux.AuthorCmdLine;
-            alvo.AutorPeloConsole = true;
+            bool mudou;
+            lock (_lock)
+            {
+                mudou = alvo.AuthorPid != aux.AuthorPid;
+                alvo.AuthorPid = aux.AuthorPid;
+                alvo.AuthorName = aux.AuthorName;
+                alvo.AuthorCmdLine = aux.AuthorCmdLine;
+                alvo.AutorPeloConsole = true;
+            }
             MontarCadeia(alvo);
             if (mudou) Notificar(alvo, "update");
         }
@@ -968,11 +1084,24 @@ namespace CmdWatch
             double melhorDt = 2.0; // segundos
             lock (_lock)
             {
+                // link ja feito e a Cascadia ainda aberta: fica com ele. Sem isso,
+                // duas abas abertas juntas (menos de 2 s) podiam trocar de autor a
+                // cada nova resolucao.
+                WindowRecord ligada;
+                if (pseudo.LinkedHwnd != IntPtr.Zero && _janelas.TryGetValue(pseudo.LinkedHwnd, out ligada)
+                    && !ligada.ClosedAt.HasValue)
+                    return ligada;
+                // Cascadias ja ligadas a OUTRA Pseudo ficam de fora
+                var ocupadas = new HashSet<IntPtr>();
+                foreach (WindowRecord r in _janelas.Values)
+                    if (r.Hwnd != pseudo.Hwnd && r.ClassName == "PseudoConsoleWindow" && r.LinkedHwnd != IntPtr.Zero && !r.ClosedAt.HasValue)
+                        ocupadas.Add(r.LinkedHwnd);
                 foreach (WindowRecord r in _janelas.Values)
                 {
                     if (r.Hwnd == pseudo.Hwnd) continue;
                     if (r.ClosedAt.HasValue) continue;
                     if (r.ClassName != "CASCADIA_HOSTING_WINDOW_CLASS") continue;
+                    if (ocupadas.Contains(r.Hwnd)) continue;
                     double dt = Math.Abs((r.FirstSeen - pseudo.FirstSeen).TotalSeconds);
                     if (dt < melhorDt) { melhorDt = dt; melhor = r; }
                 }
@@ -991,6 +1120,8 @@ namespace CmdWatch
                     if (r.Hwnd == cascadia.Hwnd) continue;
                     if (r.ClosedAt.HasValue) continue;
                     if (r.ClassName != "PseudoConsoleWindow") continue;
+                    if (r.LinkedHwnd == cascadia.Hwnd) return r;              // ja ligada a esta
+                    if (r.LinkedHwnd != IntPtr.Zero && _janelas.ContainsKey(r.LinkedHwnd)) continue; // ligada a outra
                     if (EhTerminalHost(r.AuthorName) || EhTerminalHost(r.OwnerName)) continue;
                     double dt = Math.Abs((r.FirstSeen - cascadia.FirstSeen).TotalSeconds);
                     if (dt < melhorDt) { melhorDt = dt; melhor = r; }

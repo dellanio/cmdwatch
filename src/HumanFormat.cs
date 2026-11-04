@@ -60,7 +60,7 @@ namespace CmdWatch
 
             lines.Add(new HumanLine(Lang.F("bannerTitle", info.Version), HumanRole.Banner));
             lines.Add(new HumanLine(Row(Lang.T("bannerMotor"),
-                info.Engine + (info.Engine == "wmi" ? " " + Lang.T("engineAdmin") : " " + Lang.T("engineNoAdmin"))), HumanRole.Body));
+                info.Engine + (info.Engine == "wmi" || info.Engine == "etw" ? " " + Lang.T("engineAdmin") : " " + Lang.T("engineNoAdmin"))), HumanRole.Body));
             lines.Add(new HumanLine(Row(Lang.T("bannerInterval"),
                 info.Engine == "polling" ? info.IntervalMs + " ms" : Lang.T("engineInstant")), HumanRole.Body));
             lines.Add(new HumanLine(Row(Lang.T("bannerLog"),
@@ -107,7 +107,7 @@ namespace CmdWatch
                 {
                     lines.Add(new HumanLine(Field(Lang.T("fCaller"),
                         s.Caller.Name + " (PID " + s.Caller.Pid + ")" +
-                        (s.Caller.CmdLine.Length > 0 ? " -> " + Explain.Truncate(s.Caller.CmdLine, 110) : "")), HumanRole.Body));
+                        (s.Caller.CmdLine.Length > 0 ? " -> " + Explain.Truncate(Mascara.Aplicar(s.Caller.CmdLine), 110) : "")), HumanRole.Body));
                 }
                 if (s.Chain.Count > 0)
                 {
@@ -152,12 +152,12 @@ namespace CmdWatch
                 if (ev.Step != null)
                 {
                     lines.Add(new HumanLine("             " + Lang.F("fLine", ev.Step.Line) + ": " +
-                        Explain.Truncate(ev.Step.Raw, 100), HumanRole.Body));
-                    lines.Add(new HumanLine("             -> " + ev.Step.Meaning, HumanRole.Body));
+                        Explain.Truncate(Mascara.Aplicar(ev.Step.Raw), 100), HumanRole.Body));
+                    lines.Add(new HumanLine("             -> " + Mascara.Aplicar(ev.Step.Meaning), HumanRole.Body));
                 }
                 else
                 {
-                    string cl = c == null ? "" : c.CmdLine;
+                    string cl = c == null ? "" : Mascara.Aplicar(c.CmdLine);
                     lines.Add(new HumanLine("             " + Lang.T("fCommand") + ": " +
                         Explain.Truncate(cl, 100), HumanRole.Body));
                     string m = Explain.DescribeObserved(cl);
@@ -198,11 +198,11 @@ namespace CmdWatch
                 lines.Add(new HumanLine("[" + ts + "] ++ " + Lang.T("winOpenTitle") + "  " + titulo, HumanRole.Open));
                 lines.Add(new HumanLine(Field(Lang.T("fOwner"),
                     (w.OwnerName.Length > 0 ? w.OwnerName : "?") + " (PID " + w.OwnerPid + ")" +
-                    (w.OwnerCmdLine.Length > 0 ? " -> " + Explain.Truncate(w.OwnerCmdLine, 90) : "")), HumanRole.Body));
+                    (w.OwnerCmdLine.Length > 0 ? " -> " + Explain.Truncate(Mascara.Aplicar(w.OwnerCmdLine), 90) : "")), HumanRole.Body));
                 lines.Add(new HumanLine(Field(Lang.T("fAuthor"),
                     (w.AuthorName.Length > 0 ? w.AuthorName : "?") + " (PID " + w.AuthorPid + ")" +
                     (w.AutorPeloConsole ? "  [" + Lang.T("winByConsole") + "]" : "") +
-                    (w.AuthorCmdLine.Length > 0 ? " -> " + Explain.Truncate(w.AuthorCmdLine, 90) : "")), HumanRole.Body));
+                    (w.AuthorCmdLine.Length > 0 ? " -> " + Explain.Truncate(Mascara.Aplicar(w.AuthorCmdLine), 90) : "")), HumanRole.Body));
 
                 if (w.ConsoleClients.Count > 1)
                 {
@@ -222,7 +222,7 @@ namespace CmdWatch
                     ProcInfo pai = w.Chain[0];
                     if (pai != null && pai.CmdLine.Length > 0)
                         lines.Add(new HumanLine(Field(Lang.T("fCaller"),
-                            Explain.Truncate(pai.CmdLine, 100)), HumanRole.Body));
+                            Explain.Truncate(Mascara.Aplicar(pai.CmdLine), 100)), HumanRole.Body));
                 }
                 lines.Add(new HumanLine("", HumanRole.Body));
                 return;

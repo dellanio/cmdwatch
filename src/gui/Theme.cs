@@ -2,87 +2,125 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Windows.Forms;
 
 namespace CmdWatch.Gui
 {
     /// <summary>
-    /// Paleta e tipografia do painel. As cores seguem a referencia visual:
-    /// fundo quase preto com leve verde, paineis grafite, destaques em ciano
-    /// (titulos), verde (positivo), vermelho (alerta/erro), ambar, azul, magenta e roxo.
+    /// Paleta e tipografia do painel. Visual limpo: fundo cinza muito claro,
+    /// cartoes brancos de cantos arredondados, texto quase preto, um unico azul
+    /// de destaque e cores de estado (verde, laranja, vermelho, cinza). Segue o
+    /// O padrao e o tema escuro; CMDWATCH_TEMA=claro troca para a paleta clara.
+    /// Os nomes antigos (Cyan, Panel, PanelDeep...) foram mantidos como papeis:
+    /// Cyan e o destaque, Panel e o cartao, PanelDeep o fundo das listas.
     /// </summary>
     internal static class Theme
     {
-        // fundo e superficies em cinza escuro (em vez de preto esverdeado)
-        public static readonly Color Bg = Color.FromArgb(0x1B, 0x1B, 0x1E);
-        public static readonly Color Panel = Color.FromArgb(0x25, 0x25, 0x29);
-        public static readonly Color PanelDeep = Color.FromArgb(0x1E, 0x1E, 0x22);
-        public static readonly Color Border = Color.FromArgb(0x3B, 0x3B, 0x41);
-        public static readonly Color Grid = Color.FromArgb(0x30, 0x30, 0x36);
-        public static readonly Color Text = Color.FromArgb(0xD8, 0xD8, 0xDC);
-        public static readonly Color Dim = Color.FromArgb(0x8E, 0x8E, 0x96);
+        public static readonly bool Dark;
 
-        public static readonly Color Cyan = Color.FromArgb(0x3C, 0xE4, 0xEC);
-        public static readonly Color Green = Color.FromArgb(0x3A, 0xD4, 0x6E);
-        public static readonly Color Red = Color.FromArgb(0xFF, 0x4A, 0x4A);
-        public static readonly Color Amber = Color.FromArgb(0xF7, 0xB0, 0x42);
-        public static readonly Color Blue = Color.FromArgb(0x4A, 0xA8, 0xF2);
-        public static readonly Color Purple = Color.FromArgb(0xB0, 0x66, 0xF7);
-        public static readonly Color Magenta = Color.FromArgb(0xEA, 0x52, 0xD2);
-        public static readonly Color Yellow = Color.FromArgb(0xF0, 0xDD, 0x58);
+        public static readonly Color Bg, Panel, PanelDeep, Border, Grid, Text, Dim;
+        public static readonly Color Cyan, Green, Red, Amber, Blue, Purple, Magenta, Yellow;
+        /// <summary>Fundo da linha sob o mouse e cor dos controles "pilula" inativos.</summary>
+        public static readonly Color Hover, Fill, Gray;
+        /// <summary>Verde-agua de destaque: item ativo, selecao, icones das estatisticas.</summary>
+        public static readonly Color Teal = Color.FromArgb(0x2D, 0xD4, 0xA0);
 
-        public static readonly Font Ui = new Font("Segoe UI", 8.75f, FontStyle.Regular, GraphicsUnit.Point);
-        public static readonly Font UiBold = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
-        public static readonly Font UiTitle = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
-        public static readonly Font Mono = new Font("Consolas", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-        public static readonly Font MonoSmall = new Font("Consolas", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        public static readonly Font Ui, UiBold, UiTitle, UiHeader, UiSmall, Mono, MonoSmall;
+        /// <summary>Numeros grandes das estatisticas, titulo da pagina e icones (Segoe Fluent Icons / MDL2).</summary>
+        public static readonly Font UiStat, UiPage, IconFont, IconBig;
 
-        private static Font _titleFont;
-        private static bool _titleFontResolved;
-
-        /// <summary>
-        /// Fonte dos titulos das secoes. Ordem de preferencia: Bahnschrift
-        /// (DIN tecnica, vem no Windows 10 1809+), Agency FB, Bahnschrift,
-        /// Consolas e, por ultimo, a matriz de pixels 5x7.
-        /// </summary>
-        public static Font TitleFont
+        static Theme()
         {
-            get
+            string forcado = (Environment.GetEnvironmentVariable("CMDWATCH_TEMA") ?? "").Trim().ToLowerInvariant();
+            if (forcado == "claro" || forcado == "light") Dark = false;
+            else Dark = true;   // escuro e o visual padrao do painel; claro so por CMDWATCH_TEMA=claro
+
+            if (Dark)
             {
-                if (_titleFontResolved) return _titleFont;
-                _titleFontResolved = true;
-
-                string[,] candidates =
-                {
-                    { "Bahnschrift SemiCondensed", "Regular" },
-                    { "Bahnschrift", "Regular" },
-                    { "Agency FB", "Bold" },
-                    { "Consolas", "Bold" },
-                    { "Lucida Console", "Bold" }
-                };
-
-                for (int i = 0; i < candidates.GetLength(0); i++)
-                {
-                    try
-                    {
-                        FontStyle style = (FontStyle)Enum.Parse(typeof(FontStyle), candidates[i, 1]);
-                        Font f = new Font(candidates[i, 0], 12f, style, GraphicsUnit.Point);
-                        // o construtor de Font cai silenciosamente em outra fonte:
-                        // so aceita quando o nome devolvido e o mesmo pedido
-                        if (string.Equals(f.Name, candidates[i, 0], StringComparison.OrdinalIgnoreCase))
-                        {
-                            _titleFont = f;
-                            return _titleFont;
-                        }
-                        f.Dispose();
-                    }
-                    catch { }
-                }
-
-                try { _titleFont = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point); }
-                catch { _titleFont = null; }
-                return _titleFont;
+                // azul-marinho quase preto, cartoes um tom acima com borda fina,
+                // verde-agua como destaque (estados ativos) e azul para comandos
+                Bg = Rgb(0x0B1117); Panel = Rgb(0x111820); PanelDeep = Rgb(0x111820);
+                Border = Rgb(0x1E2A33); Grid = Rgb(0x1A242D); Text = Rgb(0xE6EDF3); Dim = Rgb(0x8B98A5);
+                Cyan = Rgb(0x3B82F6); Green = Rgb(0x34D399); Red = Rgb(0xEF4444); Amber = Rgb(0xF5B544);
+                Blue = Rgb(0x60A5FA); Purple = Rgb(0xA78BFA); Magenta = Rgb(0xF472B6); Yellow = Rgb(0xFACC15);
+                Hover = Rgb(0x16202A); Fill = Rgb(0x18222C); Gray = Rgb(0x6B7785);
             }
+            else
+            {
+                Bg = Rgb(0xF5F5F7); Panel = Rgb(0xFFFFFF); PanelDeep = Rgb(0xFFFFFF);
+                Border = Rgb(0xE3E3E8); Grid = Rgb(0xEDEDF0); Text = Rgb(0x1D1D1F); Dim = Rgb(0x6E6E73);
+                // tons um pouco mais escuros que os de sistema: texto colorido legivel sobre branco
+                Cyan = Rgb(0x007AFF); Green = Rgb(0x1F9D4C); Red = Rgb(0xE5342A); Amber = Rgb(0xC77700);
+                Blue = Rgb(0x0A6CC2); Purple = Rgb(0x9944C8); Magenta = Rgb(0xD12B5A); Yellow = Rgb(0x9A7400);
+                Hover = Rgb(0xF2F2F7); Fill = Rgb(0xE9E9ED); Gray = Rgb(0xAEAEB2);
+            }
+
+            string sans = Existe("Segoe UI Variable Text") ? "Segoe UI Variable Text" : "Segoe UI";
+            string semi = Existe("Segoe UI Semibold") ? "Segoe UI Semibold" : "Segoe UI";
+            string mono = Existe("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
+            Ui = new Font(sans, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            UiSmall = new Font(sans, 8.25f, FontStyle.Regular, GraphicsUnit.Point);
+            UiBold = new Font(semi, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            UiTitle = new Font(semi, 11.5f, FontStyle.Regular, GraphicsUnit.Point);
+            UiHeader = new Font(semi, 14f, FontStyle.Regular, GraphicsUnit.Point);
+            Mono = new Font(mono, 9f, FontStyle.Regular, GraphicsUnit.Point);
+            MonoSmall = new Font(mono, 8.25f, FontStyle.Regular, GraphicsUnit.Point);
+            string bold = Existe("Segoe UI Variable Display") ? "Segoe UI Variable Display" : "Segoe UI";
+            UiStat = new Font(bold, 14f, FontStyle.Bold, GraphicsUnit.Point);
+            UiPage = new Font(bold, 18f, FontStyle.Bold, GraphicsUnit.Point);
+            string icones = Existe("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+            IconFont = new Font(icones, 10f, FontStyle.Regular, GraphicsUnit.Point);
+            IconBig = new Font(icones, 16f, FontStyle.Regular, GraphicsUnit.Point);
         }
+
+        /// <summary>Desenha um icone (glifo da fonte de icones do Windows) centrado em r.</summary>
+        public static void DrawIcon(Graphics g, string glyph, Rectangle r, Color c, Font f = null)
+        {
+            TextRenderer.DrawText(g, glyph, f ?? IconFont, r, c,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        /// <summary>Pilula de estado com contorno e fundo translucido na cor do estado.</summary>
+        public static void DrawPill(Graphics g, Rectangle r, string text, Color c, bool filled)
+        {
+            DrawPanel(g, r, r.Height / 2, Color.FromArgb(filled ? 40 : 26, c), Color.FromArgb(filled ? 200 : 90, c));
+            TextRenderer.DrawText(g, text, UiSmall, r, filled ? c : Dim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        }
+
+        private static Color Rgb(int v) { return Color.FromArgb((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF); }
+
+        private static bool Existe(string familia)
+        {
+            try
+            {
+                // o construtor de Font cai silenciosamente em outra fonte:
+                // so aceita quando o nome devolvido e o mesmo pedido
+                using (Font f = new Font(familia, 9f))
+                    return string.Equals(f.Name, familia, StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Le o tema de aplicativos do Windows (AppsUseLightTheme = 0 e escuro).</summary>
+        internal static bool WindowsEscuro()
+        {
+            try
+            {
+                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser
+                    .OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    if (k == null) return false;
+                    object v = k.GetValue("AppsUseLightTheme");
+                    if (v == null) return false;
+                    return Convert.ToInt32(v) == 0;
+                }
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Fonte dos titulos das secoes (antes Bahnschrift; agora a mesma familia da interface).</summary>
+        public static Font TitleFont { get { return UiTitle; } }
 
         public static GraphicsPath RoundRect(Rectangle r, int radius)
         {
@@ -99,18 +137,50 @@ namespace CmdWatch.Gui
             return p;
         }
 
+        /// <summary>Superficie arredondada chapada com borda fina (sem gradiente).</summary>
         public static void DrawPanel(Graphics g, Rectangle r, int radius, Color fill, Color border)
         {
+            SmoothingMode antes = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             using (GraphicsPath path = RoundRect(r, radius))
             {
-                // leve gradiente vertical: da sensacao de painel, nao de retangulo chapado
-                using (LinearGradientBrush b = new LinearGradientBrush(
-                        r, Lighten(fill, 0.07f), Darken(fill, 0.12f), LinearGradientMode.Vertical))
-                {
-                    g.FillPath(b, path);
-                }
-                using (Pen p = new Pen(border)) g.DrawPath(p, path);
+                using (SolidBrush b = new SolidBrush(fill)) g.FillPath(b, path);
+                if (border.A > 0) using (Pen p = new Pen(border)) g.DrawPath(p, path);
             }
+            g.SmoothingMode = antes;
+        }
+
+        /// <summary>Cartao: superficie branca com sombra suave por baixo (no escuro, so a borda).</summary>
+        public static void DrawCard(Graphics g, Rectangle r, int radius)
+        {
+            SmoothingMode antes = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (!Dark)
+            {
+                // sombra: dois contornos translucidos deslocados para baixo
+                for (int i = 2; i >= 1; i--)
+                {
+                    Rectangle s = new Rectangle(r.X, r.Y + i, r.Width, r.Height);
+                    using (GraphicsPath sp = RoundRect(s, radius))
+                    using (SolidBrush sb = new SolidBrush(Color.FromArgb(i == 1 ? 14 : 8, 0, 0, 0)))
+                        g.FillPath(sb, sp);
+                }
+            }
+            using (GraphicsPath path = RoundRect(r, radius))
+            {
+                using (SolidBrush b = new SolidBrush(Panel)) g.FillPath(b, path);
+                using (Pen p = new Pen(Dark ? Border : Color.FromArgb(0xE6, 0xE6, 0xEA))) g.DrawPath(p, path);
+            }
+            g.SmoothingMode = antes;
+        }
+
+        /// <summary>Bolinha de estado (verde = ativo, laranja = escondido, cinza = encerrado).</summary>
+        public static void DrawDot(Graphics g, int cx, int cy, int d, Color c)
+        {
+            SmoothingMode antes = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (SolidBrush b = new SolidBrush(c)) g.FillEllipse(b, cx - d / 2f, cy - d / 2f, d, d);
+            g.SmoothingMode = antes;
         }
 
         public static Color Lighten(Color c, float t)
@@ -145,8 +215,8 @@ namespace CmdWatch.Gui
             switch (role)
             {
                 case HumanRole.Open: return Cyan;
-                case HumanRole.Call: return Magenta;
-                case HumanRole.Step: return Yellow;
+                case HumanRole.Call: return Purple;
+                case HumanRole.Step: return Amber;
                 case HumanRole.Close: return Green;
                 case HumanRole.Banner: return Cyan;
                 default: return Text;
@@ -159,9 +229,12 @@ namespace CmdWatch.Gui
             if (r.Width <= 0 || r.Height <= 0) return;
             int radius = r.Width / 2;
             if (radius < 2) radius = 2;
+            SmoothingMode antes = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             using (GraphicsPath p = RoundRect(r, radius))
             using (SolidBrush b = new SolidBrush(fill))
                 g.FillPath(b, p);
+            g.SmoothingMode = antes;
         }
     }
 

@@ -44,6 +44,8 @@ namespace CmdWatch
         public string ScriptArgs = "";
         public string RawCmdLine = "";
         public DateTime StartedAt;
+        /// <summary>Hora real de inicio do cmd.exe (MinValue se desconhecida): confere o pid antes de encerrar.</summary>
+        public DateTime CmdStartedAt = DateTime.MinValue;
         public ProcInfo Caller;
         public readonly List<ProcInfo> Chain = new List<ProcInfo>();
         public BatchFile Analysis;
@@ -109,69 +111,6 @@ namespace CmdWatch
     }
 
     /// <summary>Motor por consulta periodica a Win32_Process. Nao exige administracao.</summary>
-    /// <summary>
-    /// Sensor complementar (sem administrador): escuta a criacao de cmd.exe via
-    /// WMI __InstanceCreationEvent. O Win32_ProcessStartTrace exige admin; este
-    /// caminho nao. Acorda o polling e entrega o PID na hora - essencial para
-    /// .cmd ocultos e curtos (~25ms) que o retrato em 500ms perde quando a
-    /// maquina esta parada.
-    ///
-    /// O WITHIN 0.1 faz o servico WMI varrer a cada 100ms: bem mais barato que
-    /// baixar o intervalo do SnapshotFast para 50ms o tempo todo.
-    /// </summary>
-    internal sealed class CmdCreationSensor : IDisposable
-    {
-        private ManagementEventWatcher _watcher;
-        private Action<int> _onCmd;
-        private ManualResetEvent _wake;
-
-        public void Start(Action<int> onCmd, ManualResetEvent wake)
-        {
-            _onCmd = onCmd;
-            _wake = wake;
-            try
-            {
-                // WITHIN 0.1 = 100ms; filtra so cmd.exe para nao inundar
-                string q = "SELECT * FROM __InstanceCreationEvent WITHIN 0.1 "
-                    + "WHERE TargetInstance ISA 'Win32_Process' "
-                    + "AND TargetInstance.Name = 'cmd.exe'";
-                _watcher = new ManagementEventWatcher(new WqlEventQuery(q));
-                _watcher.EventArrived += OnEvent;
-                _watcher.Start();
-            }
-            catch
-            {
-                // sem permissao ou WMI indisponivel: o polling continua sozinho
-                try { if (_watcher != null) _watcher.Dispose(); } catch { }
-                _watcher = null;
-            }
-        }
-
-        private void OnEvent(object sender, EventArrivedEventArgs e)
-        {
-            try
-            {
-                ManagementBaseObject ti = (ManagementBaseObject)e.NewEvent["TargetInstance"];
-                if (ti == null) return;
-                int pid = PollingEngine.ToInt(ti["ProcessId"]);
-                if (pid <= 0) return;
-                try { if (_wake != null) _wake.Set(); } catch { }
-                Action<int> cb = _onCmd;
-                if (cb != null) cb(pid);
-            }
-            catch { }
-        }
-
-        public void Stop()
-        {
-            try { if (_watcher != null) _watcher.Stop(); } catch { }
-            try { if (_watcher != null) _watcher.Dispose(); } catch { }
-            _watcher = null;
-        }
-
-        public void Dispose() { Stop(); }
-    }
-
     internal sealed class PollingEngine : IEngine
     {
         public static bool Verbose;
@@ -181,7 +120,6 @@ namespace CmdWatch
         private readonly Dictionary<int, ProcInfo> _known = new Dictionary<int, ProcInfo>();
         private Thread _thread;
         private volatile bool _running;
-        private CmdCreationSensor _cmdSensor;
         private Action<ProcInfo> _onStart;
 
         /// <summary>
@@ -222,37 +160,9 @@ namespace CmdWatch
             _running = true;
             _onStart = onStart;
             Seed();
-            // sensor WMI (sem admin): cmd.exe curto nao depende so do intervalo
-            try
-            {
-                _cmdSensor = new CmdCreationSensor();
-                _cmdSensor.Start(OnCmdCriado, Wake);
-            }
-            catch { _cmdSensor = null; }
             _thread = new Thread(() => Loop(onStart, onExit));
             _thread.IsBackground = true;
             _thread.Start();
-        }
-
-        /// <summary>cmd.exe nasceu: hidrata e processa sem esperar o proximo retrato.</summary>
-        private void OnCmdCriado(int pid)
-        {
-            if (pid <= 0 || _onStart == null) return;
-            try
-            {
-                ProcInfo pi;
-                if (!NativeProcess.TryGetProcessInfo(pid, out pi) || pi == null)
-                {
-                    pi = new ProcInfo();
-                    pi.Pid = pid;
-                    pi.Name = "cmd.exe";
-                }
-                if (pi.Name.Length == 0) pi.Name = "cmd.exe";
-                Hydrate(pi);
-                lock (_known) { _known[pid] = pi; }
-                _onStart(pi);
-            }
-            catch { }
         }
 
         private void Seed()
@@ -499,8 +409,6 @@ namespace CmdWatch
         public void Stop()
         {
             _running = false;
-            try { if (_cmdSensor != null) _cmdSensor.Stop(); } catch { }
-            _cmdSensor = null;
         }
         public void Dispose() { Stop(); }
     }
@@ -854,7 +762,7 @@ namespace CmdWatch
             {
                 Console.ForegroundColor = ConsoleColor.DarkGray;
                 Console.WriteLine("  [proc] pid=" + p.Pid + " ppid=" + p.ParentPid + " " + p.Name +
-                                  "  cmd=" + (p.CmdLine.Length > 0 ? p.CmdLine : "(sem command line)"));
+                                  "  cmd=" + (p.CmdLine.Length > 0 ? Mascara.Aplicar(p.CmdLine) : "(sem command line)"));
                 Console.ForegroundColor = ConsoleColor.Gray;
             }
 
@@ -937,6 +845,7 @@ namespace CmdWatch
                 ScriptArgs = args,
                 RawCmdLine = p.CmdLine,
                 StartedAt = p.StartedAt != DateTime.MinValue ? p.StartedAt : DateTime.Now,
+                CmdStartedAt = p.StartedAt,
                 Analysis = BatchParser.Parse(resolved)
             };
 

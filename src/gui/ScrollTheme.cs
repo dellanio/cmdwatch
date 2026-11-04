@@ -18,7 +18,8 @@ namespace CmdWatch.Gui
 
         static ScrollTheme()
         {
-            Dark = IsWindowsDark();
+            // segue o tema do painel (que segue o do Windows, ou CMDWATCH_TEMA)
+            Dark = Theme.Dark;
             if (Dark)
             {
                 // Windows 11 escuro
