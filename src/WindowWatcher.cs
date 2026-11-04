@@ -313,6 +313,12 @@ namespace CmdWatch
                     return;
                 }
 
+                // evento da JANELA, e nao de um objeto dentro dela: um
+                // EVENT_OBJECT_DESTROY de um controle filho chega com o hwnd
+                // da janela-pai, e fechava a janela que continuava de pe.
+                // (OBJID_WINDOW = 0, CHILDID_SELF = 0)
+                if (idObject != 0 || idChild != 0) return;
+
                 if (eventType == EVENT_OBJECT_CREATE || eventType == EVENT_OBJECT_SHOW)
                 {
                     bool visivel = EhJanelaRelevante(hwnd);
@@ -798,6 +804,12 @@ namespace CmdWatch
         {
             try
             {
+                // A janela so fecha se ela realmente sumiu. O teste usa a CLASSE
+                // da janela e nao IsWindow: medido nesta maquina, IsWindow devolve
+                // falso para janela viva de outro processo, enquanto GetClassNameW
+                // (que o cmdwatch ja usava para ler o titulo) responde certo.
+                if (NomeDaClasse(hwnd).Length > 0) return;
+
                 WindowRecord rec;
                 lock (_lock)
                 {
@@ -839,15 +851,17 @@ namespace CmdWatch
                     {
                         WindowRecord r = kv.Value;
                         if (r.ClosedAt.HasValue) { _lixo.Add(kv.Key); continue; }
-                        // janela so escondida (SW_HIDE): IsWindow continua
-                        // verdadeiro. Nao emitir close nem remover — ao
-                        // reaparecer, Registrar atualiza em vez de abrir de novo.
+                        // janela que sumiu da varredura: ela esta ESCONDIDA, nao
+                        // fechada. Quem decide que uma janela fechou e o evento de
+                        // destruicao - e IsWindow nao serve para isso aqui (medido:
+                        // devolve falso para janela viva de outro processo).
                         if (!vistas.Contains(kv.Key) && !r.Visible)
                         {
-                            if (IsWindow(kv.Key)) continue;
-                            r.ClosedAt = DateTime.Now;
-                            Notificar(r, "close");
-                            _lixo.Add(kv.Key);
+                            if (!r.HiddenAt.HasValue)
+                            {
+                                r.HiddenAt = DateTime.Now;
+                                if (!r.Auxiliar) Notificar(r, "hide");
+                            }
                         }
                     }
                     foreach (IntPtr h in _lixo) _janelas.Remove(h);
