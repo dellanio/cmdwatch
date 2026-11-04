@@ -73,7 +73,13 @@ namespace CmdWatch
         private static extern int NtQueryInformationProcess(IntPtr processHandle, int informationClass,
             ref PROCESS_BASIC_INFORMATION information, int informationLength, out int returnLength);
 
-        [DllImport("ntdll.dll")]
+        // O EntryPoint e OBRIGATORIO aqui. Sem ele, o runtime procura no ntdll.dll
+        // uma funcao chamada literalmente "NtQueryInformationProcessRaw" - que nao
+        // existe - e a chamada LANCA EntryPointNotFoundException. Como o erro era
+        // engolido por um catch, a consulta limitada NUNCA rodou: o cmdwatch seguia
+        // lendo a linha de comando pelo PEB, que um processo ELEVADO bloqueia.
+        // Era esse o motivo de o script elevado nao aparecer no log.
+        [DllImport("ntdll.dll", EntryPoint = "NtQueryInformationProcess")]
         private static extern int NtQueryInformationProcessRaw(IntPtr processHandle, int informationClass,
             IntPtr information, int informationLength, out int returnLength);
 
@@ -151,6 +157,11 @@ namespace CmdWatch
         /// </summary>
         public static List<ProcInfo> SnapshotFast()
         {
+            // o buffer estatico e compartilhado: Lookup (thread de janelas) e o
+            // motor de polling podem chamar ao mesmo tempo. Sem a trava, um
+            // lado libera enquanto o outro ainda le - leitura corrompida ou queda.
+            lock (_bufferLock)
+            {
             var list = new List<ProcInfo>();
             IntPtr buf = _buffer;
             int cap = _bufferCap;
@@ -189,6 +200,11 @@ namespace CmdWatch
                 // (NextEntryOffset e NumberOfThreads) sao de 32 bits, o que
                 // desloca todo o resto. Descobre qual dos dois vale pelo
                 // CreateTime, que tem um valor reconhecivel.
+                //
+                // SessionId e ULONG (32 bits). No layout moderno (quatroBytes)
+                // ele fica em 0x64 (depois de HandleCount em 0x60). Ler 8 bytes
+                // em 0x68 pegava UniqueProcessKey e gerava ids absurdos
+                // (ex.: 59133952, 2699013802) no lugar da sessao real (1).
                 bool quatroBytes = PareceFileTime(ReadLong(buf, 0x20));
                 int offNext = 0;
                 int offCreate = quatroBytes ? 0x20 : 0x28;
@@ -196,12 +212,12 @@ namespace CmdWatch
                 int offNamePtr = offName + 8;
                 int offPid = quatroBytes ? 0x50 : 0x58;
                 int offPpid = quatroBytes ? 0x58 : 0x60;
-                int offSession = quatroBytes ? 0x68 : 0x70;
+                int offSession = quatroBytes ? 0x64 : 0x6C;
 
                 long offset = 0;
                 while (true)
                 {
-                    // layout medido do SYSTEM_PROCESS_INFORMATION:
+                    // layout medido do SYSTEM_PROCESS_INFORMATION (Win10/11 x64):
                     //   0x00 NextEntryOffset (4 ou 8 bytes)
                     //   0x04 NumberOfThreads
                     //   0x08 WorkingSetPrivateSize
@@ -209,7 +225,7 @@ namespace CmdWatch
                     //   0x20 CreateTime (FILETIME)
                     //   0x28 UserTime / 0x30 KernelTime
                     //   0x38 UNICODE_STRING ImageName (Length, MaxLen, Buffer)
-                    //   0x50 UniqueProcessId / 0x58 pai / 0x60 handles / 0x68 sessao
+                    //   0x50 UniqueProcessId / 0x58 pai / 0x60 handles / 0x64 sessao
                     long next = quatroBytes
                         ? (uint)Marshal.ReadInt32(buf, (int)(offset + offNext))
                         : ReadLong(buf, offset + offNext);
@@ -220,7 +236,7 @@ namespace CmdWatch
                         ProcInfo pi = new ProcInfo();
                         pi.Pid = pid;
                         pi.ParentPid = (int)ReadLong(buf, offset + offPpid);
-                        pi.SessionId = (uint)ReadLong(buf, offset + offSession);
+                        pi.SessionId = unchecked((uint)Marshal.ReadInt32(buf, (int)(offset + offSession)));
 
                         // ImageName: o ponteiro do texto aponta para DENTRO do
                         // buffer devolvido - mas so e copiado se estiver
@@ -248,6 +264,7 @@ namespace CmdWatch
             catch { return null; }
             finally { /* o buffer e reaproveitado: nao e liberado aqui */ }
             return list.Count > 0 ? list : null;
+            } // lock _bufferLock
         }
 
         // diagnostico do ultimo retrato
@@ -257,6 +274,7 @@ namespace CmdWatch
         public static int UltimoTamanho;
 
         // buffer reaproveitado entre os retratos (ver SnapshotFast)
+        private static readonly object _bufferLock = new object();
         private static IntPtr _buffer = IntPtr.Zero;
         private static int _bufferCap = 0;
 
@@ -301,22 +319,43 @@ namespace CmdWatch
         /// linha de comando usando apenas PROCESS_QUERY_LIMITED_INFORMATION, que
         /// o Windows concede mesmo para processos de integridade maior.
         /// </summary>
+        /// <summary>
+        /// Ultimo erro da consulta limitada (vazio = deu certo). Existe para que
+        /// uma falha NAO possa ficar escondida dentro de um catch: foi
+        /// exatamente um catch mudo em cima de um EntryPoint errado que deixou
+        /// o cmdwatch cego para processo elevado por uma versao inteira.
+        /// </summary>
+        public static string UltimoErroLimitado = "";
+
         public static bool TryGetCommandLineLimited(int pid, out string commandLine)
         {
             commandLine = "";
+            UltimoErroLimitado = "";
             IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-            if (h == IntPtr.Zero) return false;
+            if (h == IntPtr.Zero)
+            {
+                UltimoErroLimitado = "OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) falhou: erro " + Marshal.GetLastWin32Error();
+                return false;
+            }
             IntPtr buf = IntPtr.Zero;
             try
             {
                 int cap = 64 * 1024;
                 buf = Marshal.AllocHGlobal(cap);
                 int ret;
-                if (NtQueryInformationProcessRaw(h, ProcessCommandLineInformation, buf, cap, out ret) != 0)
+                int status = NtQueryInformationProcessRaw(h, ProcessCommandLineInformation, buf, cap, out ret);
+                if (status != 0)
+                {
+                    UltimoErroLimitado = "NtQueryInformationProcess(60) status=0x" + status.ToString("X8");
                     return false;
+                }
 
                 ushort len = ReadUShort(buf, 0);
-                if (len == 0) return false;
+                if (len == 0)
+                {
+                    UltimoErroLimitado = "NtQueryInformationProcess(60) devolveu linha de comando vazia";
+                    return false;
+                }
 
                 // o ponteiro do texto costuma apontar para dentro do proprio
                 // buffer devolvido: calculamos o deslocamento em vez de presumir
@@ -332,7 +371,13 @@ namespace CmdWatch
                 commandLine = Encoding.Unicode.GetString(b);
                 return commandLine.Length > 0;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                // nunca engolir: um catch mudo aqui ja escondeu uma falha de
+                // EntryPoint por uma versao inteira
+                UltimoErroLimitado = "consulta limitada: " + ex.GetType().Name + " - " + ex.Message;
+                return false;
+            }
             finally
             {
                 try { if (buf != IntPtr.Zero) Marshal.FreeHGlobal(buf); } catch { }

@@ -203,11 +203,26 @@ namespace CmdWatch
                     (w.AuthorName.Length > 0 ? w.AuthorName : "?") + " (PID " + w.AuthorPid + ")" +
                     (w.AutorPeloConsole ? "  [" + Lang.T("winByConsole") + "]" : "") +
                     (w.AuthorCmdLine.Length > 0 ? " -> " + Explain.Truncate(w.AuthorCmdLine, 90) : "")), HumanRole.Body));
+
                 if (w.ConsoleClients.Count > 1)
                 {
                     lines.Add(new HumanLine(Field(Lang.T("fConsole"),
                         w.ConsoleClients.Count + " " + Lang.T("fOthers") +
                         " (" + Explain.Truncate(string.Join(", ", w.ConsoleClients.ToArray()), 90) + ")"), HumanRole.Body));
+                }
+                if (w.Chain.Count > 0)
+                {
+                    var bits = new System.Collections.Generic.List<string>();
+                    foreach (ProcInfo a in w.Chain)
+                    {
+                        string nome = a.Name.Length > 0 ? a.Name : ("pid:" + a.Pid);
+                        bits.Add(nome + "(" + a.Pid + ")");
+                    }
+                    lines.Add(new HumanLine(Field(Lang.T("fChain"), string.Join(" -> ", bits.ToArray())), HumanRole.Body));
+                    ProcInfo pai = w.Chain[0];
+                    if (pai != null && pai.CmdLine.Length > 0)
+                        lines.Add(new HumanLine(Field(Lang.T("fCaller"),
+                            Explain.Truncate(pai.CmdLine, 100)), HumanRole.Body));
                 }
                 lines.Add(new HumanLine("", HumanRole.Body));
                 return;

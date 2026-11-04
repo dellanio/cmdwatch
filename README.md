@@ -112,18 +112,17 @@ O que é registrado para cada janela:
 | **Foco** | quantas vezes a janela veio para frente |
 | **Estado** | `visível`, `oculta` ou `fechada` |
 
-**Quem é o autor — e por que a árvore de processos não resolve.** No Windows Terminal, a
-janela pertence ao `WindowsTerminal.exe`, cujo pai é um `svchost.exe` de broker: a árvore
-de processos **não alcança** quem está digitando. A solução do cmdwatch é **perguntar ao
-próprio console**: `AttachConsole` + `GetConsoleProcessList` devolvem os clientes reais do
-console (o `cmdwatch.exe`, o `powershell.exe`…), e é de lá que sai o autor e o comando dele.
-Quando o console não responde, o cmdwatch cai para a árvore de processos — e ainda assim
-**só considera** um dono que seja um shell, nunca o `conhost.exe`/`OpenConsole.exe`, que são
-servidores de console, não autores.
+**Quem e o autor.** No Windows Terminal existem **duas** janelas top-level por aba: a
+`CASCADIA_HOSTING_WINDOW_CLASS` (titulo, dono `WindowsTerminal.exe`) e a
+`PseudoConsoleWindow` (dono = processo real da sessao). O cmdwatch **associa** as duas: a
+Pseudo fica auxiliar (nao conta em dobro) e a Cascadia herda o autor, o comando e a
+**cadeia de ancestrais** do processo real. Quando a associacao nao da, ou a janela nao e
+de terminal, o autor vem da arvore de processos do dono (com validacao de horario de
+criacao contra reuso de PID) e, se ainda houver, da pergunta ao console
+(`AttachConsole` + `GetConsoleProcessList`) - util sobretudo no **painel**. No modo CLI o
+cmdwatch ja esta anexado a um console, entao essa pergunta fica desligada
+(`GetConsoleProcessList != 0`) e o autor vem da arvore / da Pseudo.
 
-A atribuição pelo console funciona no **painel** (que roda na sua sessão de usuário). No
-modo CLI, o cmdwatch já está anexado a um console — então a pergunta ao console não é
-possível e a atribuição usa a árvore de processos.
 
 Os eventos de janela entram **no mesmo fluxo do CLI** (e no mesmo log JSONL):
 
@@ -133,6 +132,23 @@ Os eventos de janela entram **no mesmo fluxo do CLI** (e no mesmo log JSONL):
 ```
 
 > A janela do próprio cmdwatch **não entra** na lista dele.
+
+### Correções da v1.1.1
+
+Quatro defeitos achados no teste de campo da v1.1.0, todos medidos antes de corrigir:
+
+| Defeito | Causa | Correção |
+|---|---|---|
+| **Processo elevado sumia do log** | a chamada à consulta limitada usava um nome de função inexistente no `ntdll.dll`; o erro era engolido por um `catch` e a leitura caía no PEB — que processo elevado bloqueia | `EntryPoint` correto: a consulta passa a ler a linha de comando de processo elevado (medido: 6 de 6 processos de integridade alta lidos) |
+| **A janela mostrava o programa, não quem o chamou** | o autor era escolhido como o cliente de console **mais recente** (o `git.exe` transitório) | o autor passa a ser o **ancestral mais próximo dentro do console, sem contar a raiz**: num console `cmd.exe → python.exe → git.exe`, o autor é o `python.exe` (quem chamou), e o `git.exe` fica registrado como o *programa* em execução |
+| **Janela escondida virava "fechada"** | a varredura deduzia "fechada" de "não apareceu na varredura" | só é fechada quando o Windows confirma que a janela **não existe mais**; escondida ela é *oculta*, e ao reaparecer continua a mesma janela |
+| **`sessionId` saindo como 59133952** | o campo era lido no offset errado (`0x68` = `UniqueProcessKey`) | corrigido para `0x64`, medido nos 859 registros da máquina |
+
+E uma melhoria de captura: a **janela de console oculta** (o `cmd.exe` que roda com a janela
+escondida) dispara evento de criação do mesmo jeito que a visível — mas o filtro de
+visibilidade a descartava. Agora ela **acorda o motor** e dispara uma consulta dirigida ao
+`cmd.exe`, que é o dono da janela de console. É o que faz um script oculto com console
+aparecer mesmo com a máquina parada.
 
 ### O fluxo fala a língua do terminal
 
@@ -373,9 +389,30 @@ o cmdwatch alterna entre dois regimes:
 
 E, quando **aparece uma janela**, o motor acorda na hora: o evento de janela dispara uma
 consulta dirigida ao processo dono da janela (em vez de um retrato global) e o motor retoma
-imediatamente. Custo medido: **CLI 3,0–3,4%** e **painel 4,8–8,1%** de um núcleo, contra
-~29% antes — com o rastreamento de scripts **igual** (bateria de regressão: 12 chamadas de
-11 formas diferentes, resultado idêntico ao da v1.0.10).
+imediatamente.
+
+**Custo medido nesta máquina (~600–870 processos):**
+
+| Situação | CPU de um núcleo |
+|---|---|
+| **parado** (regime lento, 500 ms) | **~2–3%** |
+| **com atividade** (regime rápido, 50 ms) | **~14–18%** |
+| painel, com atividade | ~8–14% |
+
+O número depende do regime — os "3%" da v1.1.0 eram a medição de **máquina parada**, e a
+nota de release não dizia isso. Com scripts rodando o motor fica a 50 ms e o custo sobe para
+~14–18%: o retrato do sistema custa **7–20 ms por chamada** (o kernel varre todos os
+processos), e é o mesmo motor do v1.0.10 — que gastava ~29% porque varria mais caro
+(Toolhelp, ~34 ms) e sem parar.
+
+O que mudou em relação ao v1.0.10 foi o **preço** do retrato e a **razão** para acelerar, não
+a capacidade de ver scripts: o retrato ficou mais barato (`NtQuerySystemInformation` com
+buffer reaproveitado) e o motor só acelera quando há motivo.
+
+> **Escopo da regressão (corrigido):** a bateria de 11 formas de chamada (12 chamadas,
+> resultado idêntico ao da v1.0.10) cobria scripts **visíveis e longos**. Ela **não** cobria
+> script `.cmd` **oculto e curto**, que no regime lento (500 ms) escapa — ver
+> [Limitações conhecidas](#limitações-conhecidas).
 
 ### Atribuição: quem chamou
 
@@ -528,15 +565,19 @@ Os eventos de janela usam o mesmo formato, com um bloco `window`:
 
 Tipos de janela: `window_open`, `window_focus`, `window_hide`, `window_close`.
 
-> `byConsole` diz se o autor foi achado **perguntando ao console** (o caminho confiável) ou
-> pela árvore de processos (o *fallback*).
+> `byConsole` diz se o autor foi achado **perguntando ao console** ou pela árvore / Pseudo.
+> `chain` no `window_open` lista os ancestrais do autor (como no `batch_open`), inclusive processos já encerrados (cache recente).
 
 ---
 
 ## Limitações conhecidas
 
-* **Processos que duram menos de ~50 ms** podem escapar quando o motor está no intervalo
-  lento (500 ms). Com admin, use `--engine wmi` para não perder nenhum.
+* **Scripts `.cmd` ocultos e curtos (~25 ms) com a máquina parada** podem escapar do motor
+  `polling`: no intervalo lento (500 ms) a taxa medida ficou em **0/6 a 2/8**; com
+  `--interval 50` sobe (tipicamente 4/4 a 8/8), ao custo de mais CPU. O evento WMI
+  `__InstanceCreationEvent WITHIN …` **também é polling** e perde processos mais curtos
+  que o WITHIN; `Win32_ProcessStartTrace` (motor `wmi`) exige administrador. Sem admin,
+  captura de scripts ocultos sub-intervalo **não é garantida**.
 * **Linha de comando inacessível** apenas em processos **protegidos** (SYSTEM) — a consulta
   limitada lê a linha de comando de processo elevado sem qualquer elevação do cmdwatch.
   Para processos de outro usuário, o evento é registrado, mas sem a linha de comando.

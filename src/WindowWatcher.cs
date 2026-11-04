@@ -19,6 +19,13 @@ namespace CmdWatch
         public int AuthorPid;
         public string AuthorName = "";
         public string AuthorCmdLine = "";
+        /// <summary>
+        /// O programa que esta rodando na janela agora (o cliente mais novo do
+        /// console). Quando ha um intermediario - um script que chamou um
+        /// programa - o autor e esse intermediario e o programa fica aqui.
+        /// </summary>
+        public int ProgramPid;
+        public string ProgramName = "";
         /// <summary>Processos ligados ao console da janela.</summary>
         public readonly List<int> ConsoleClients = new List<int>();
         public DateTime FirstSeen;
@@ -32,6 +39,19 @@ namespace CmdWatch
         public bool AutorPeloConsole;
         /// <summary>Ultima vez que o autor foi recalculado.</summary>
         public DateTime UltimaResolucao = DateTime.MinValue;
+        /// <summary>
+        /// Cadeia de ancestrais do autor (pai, avo...), com linhas de comando.
+        /// Mesmo formato do chain do batch_open: permite ver quem chamou mesmo
+        /// quando o autor da janela e so o executavel final (git.exe, etc.).
+        /// </summary>
+        public readonly List<ProcInfo> Chain = new List<ProcInfo>();
+        /// <summary>
+        /// Janela auxiliar (PseudoConsoleWindow) associada a uma janela Cascadia
+        /// do Windows Terminal. Nao conta em dobro no painel/log.
+        /// </summary>
+        public bool Auxiliar;
+        /// <summary>Hwnd da janela Cascadia a que esta PseudoConsole esta ligada.</summary>
+        public IntPtr LinkedHwnd = IntPtr.Zero;
 
         public bool Fechada { get { return ClosedAt.HasValue; } }
 
@@ -82,6 +102,9 @@ namespace CmdWatch
         [DllImport("kernel32.dll")]
         private static extern uint GetCurrentProcessId();
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
+
         /// <summary>
         /// Descobre se o processo pode anexar a um console. So da para anexar
         /// quando o processo NAO tem console proprio.
@@ -112,6 +135,9 @@ namespace CmdWatch
                     FreeConsole();
                     if (!AttachConsole((uint)pid)) return res;
                     anexado = true;
+                    // sem isso, fechar o console anexado (ou Ctrl+C nele) pode
+                    // matar o proprio cmdwatch junto com o grupo do console
+                    try { SetConsoleCtrlHandler(IntPtr.Zero, true); } catch { }
 
                     uint[] buf = new uint[64];
                     uint n = GetConsoleProcessList(buf, (uint)buf.Length);
@@ -289,8 +315,23 @@ namespace CmdWatch
 
                 if (eventType == EVENT_OBJECT_CREATE || eventType == EVENT_OBJECT_SHOW)
                 {
-                    if (!EhJanelaRelevante(hwnd)) return;
-                    Registrar(hwnd);
+                    bool visivel = EhJanelaRelevante(hwnd);
+                    if (visivel)
+                    {
+                        Registrar(hwnd);
+                    }
+                    else if (EhJanelaConsole(hwnd))
+                    {
+                        // janela de console ESCONDIDA: nao entra na lista (nao esta
+                        // na tela), mas e o aviso de que um script comecou. O
+                        // dono dela e o proprio cmd.exe, entao uma consulta
+                        // dirigida acha a linha de comando na hora - sem esperar
+                        // o proximo retrato do sistema, que perderia um script
+                        // que vive menos de 100 ms.
+                        AcordarConsole(hwnd);
+                    }
+                    else return;
+
                     // acorda o motor de processos: a janela acabou de aparecer
                     try { Wake.Set(); } catch { }
                     return;
@@ -331,6 +372,29 @@ namespace CmdWatch
                 int len = GetWindowTextLengthW(hwnd);
                 if (len > 0) return true;
 
+                string cls = NomeDaClasse(hwnd);
+                return cls == "ConsoleWindowClass" || cls == "PseudoConsoleWindow";
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Uma janela de CONSOLE - visivel ou nao.
+        ///
+        /// Isso e o que faz o script curto e ESCONDIDO nao escapar: a janela de
+        /// console oculta (SW_HIDE) dispara evento de criacao do mesmo jeito
+        /// que a visivel (medido), mas nao passa no filtro de visibilidade.
+        /// Como a janela e criada junto com o cmd.exe, ela e o aviso de que
+        /// um script comecou - e o aviso chega antes do processo sumir.
+        /// </summary>
+        private bool EhJanelaConsole(IntPtr hwnd)
+        {
+            try
+            {
+                if (GetAncestor(hwnd, GA_ROOT) != hwnd) return false;
+                uint dono;
+                GetWindowThreadProcessId(hwnd, out dono);
+                if ((int)dono == GetCurrentProcessId()) return false;
                 string cls = NomeDaClasse(hwnd);
                 return cls == "ConsoleWindowClass" || cls == "PseudoConsoleWindow";
             }
@@ -385,6 +449,10 @@ namespace CmdWatch
 
                 LerDados(hwnd, rec);
                 DespertarCmd(rec);
+                // janela de console: o dono e o proprio cmd.exe, mesmo quando ele
+                // ainda nao passou pelo retrato do sistema (e por isso o nome do
+                // dono ainda e "?")
+                if (EhJanelaConsole(hwnd)) AcordarConsole(hwnd);
 
                 bool mudou = novo
                     || !tituloAntes.Equals(rec.Title, StringComparison.Ordinal)
@@ -396,12 +464,23 @@ namespace CmdWatch
 
                 if (!recalcular) return;
 
-                rec.Visible = true;
-                rec.HiddenAt = null;
+                // so marca como reexibida se a janela estiver visivel de verdade
+                if (rec.Visible) rec.HiddenAt = null;
                 rec.UltimaResolucao = DateTime.Now;
 
                 int autorAntes = rec.AuthorPid;
                 ResolverAutor(rec);
+                AssociarTerminal(rec);
+                MontarCadeia(rec);
+
+                // PseudoConsole auxiliar: nao gera open proprio (evita dobra
+                // com a janela Cascadia do Windows Terminal)
+                if (rec.Auxiliar)
+                {
+                    if (novo || mudou || autorAntes != rec.AuthorPid)
+                        PropagarAutorParaLigada(rec);
+                    return;
+                }
 
                 if (novo) Notificar(rec, "open");
                 else if (mudou || autorAntes != rec.AuthorPid) Notificar(rec, "update");
@@ -422,6 +501,10 @@ namespace CmdWatch
                 GetWindowThreadProcessId(hwnd, out pid);
                 rec.OwnerPid = (int)pid;
 
+                // o estado real da janela: e o que permite distinguir "escondida"
+                // de "fechada" quando ela volta a aparecer
+                rec.Visible = IsWindowVisible(hwnd);
+
                 if (Processos != null)
                 {
                     ProcInfo dono = Processos.Buscar(rec.OwnerPid);
@@ -432,6 +515,29 @@ namespace CmdWatch
                     }
                 }
                 if (rec.OwnerName.Length == 0) rec.OwnerName = "?";
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Acorda o motor a partir de uma janela de console ESCONDIDA.
+        ///
+        /// O dono da janela de console e o proprio cmd.exe (medido: a janela do
+        /// console tem o dono no cliente inicial do console). Como a janela e
+        /// criada junto com o processo, uma consulta dirigida acha a linha de
+        /// comando na hora - inclusive de um script que vive menos de 100 ms,
+        /// que o retrato periodico perderia.
+        /// </summary>
+        private void AcordarConsole(IntPtr hwnd)
+        {
+            try
+            {
+                if (AoDescobrirProcesso == null) return;
+                uint pid;
+                GetWindowThreadProcessId(hwnd, out pid);
+                if (pid == 0) return;
+                if ((int)pid == GetCurrentProcessId()) return;
+                AoDescobrirProcesso((int)pid);
             }
             catch { }
         }
@@ -487,27 +593,62 @@ namespace CmdWatch
             {
                 rec.ConsoleClients.AddRange(clients);
 
-                int melhor = 0;
-                DateTime maisNovo = DateTime.MinValue;
+                // consulta dirigida a cada cliente do console: nome, pai e hora
+                // de inicio. Sem retrato geral - e funciona para processo elevado.
+                var dados = new Dictionary<int, ProcInfo>();
                 foreach (int p in clients)
                 {
-                    if (p == rec.OwnerPid) continue;
-                    DateTime inicio = DateTime.MinValue;
-                    if (Processos != null)
-                    {
-                        ProcInfo pi = Processos.Buscar(p);
-                        if (pi != null)
-                        {
-                            if (EhHospedeiroConsole(pi.Name)) continue;
-                            if (pi.StartedAt != DateTime.MinValue) inicio = pi.StartedAt;
-                        }
-                    }
-                    if (inicio > maisNovo) { maisNovo = inicio; melhor = p; }
+                    ProcInfo pi;
+                    if (NativeProcess.TryGetProcessInfo(p, out pi) && pi != null && pi.Name.Length > 0)
+                        dados[p] = pi;
                 }
 
-                int escolhido = melhor != 0 ? melhor : rec.OwnerPid;
-                AplicarAutor(rec, escolhido);
-                rec.AutorPeloConsole = escolhido != rec.OwnerPid;
+                if (dados.Count > 0)
+                {
+                    // o mais antigo abriu o console (a raiz); o mais novo e o
+                    // programa que esta rodando agora. A lista do console NAO
+                    // vem ordenada - a ordem e a de anexacao - entao ordena por
+                    // hora de inicio.
+                    var ordem = new List<int>(dados.Keys);
+                    ordem.Sort(delegate (int a, int b)
+                    {
+                        DateTime ta = dados[a].StartedAt;
+                        DateTime tb = dados[b].StartedAt;
+                        return ta.CompareTo(tb);
+                    });
+
+                    int raiz = ordem[0];
+                    int programa = ordem[ordem.Count - 1];
+                    rec.ProgramPid = programa;
+                    rec.ProgramName = dados[programa].Name;
+
+                    // O AUTOR e quem CHAMOU o programa: o ancestral mais profundo
+                    // do programa dentro do console, sem contar a raiz.
+                    //   console: cmd.exe -> python.exe -> git.exe
+                    //       programa = git.exe   autor = python.exe (quem chamou)
+                    //   console: cmd.exe -> ping.exe
+                    //       programa = ping.exe  autor = ping.exe (o shell nao
+                    //       tem intermediario - o programa e o autor)
+                    int autor = programa;
+                    int atual = programa;
+                    for (int guarda = 0; guarda < 8; guarda++)
+                    {
+                        int pai = dados[atual].ParentPid;
+                        if (pai <= 0) break;
+                        if (!dados.ContainsKey(pai)) break;   // saiu do console
+                        if (pai == raiz) break;              // a raiz e o shell, nao o autor
+                        autor = pai;
+                        atual = pai;
+                    }
+
+                    AplicarAutor(rec, autor);
+                    rec.AutorPeloConsole = true;
+                    return;
+                }
+
+                // sem dados: fica com o proprio dono
+                AplicarAutor(rec, rec.OwnerPid);
+                rec.AutorPeloConsole = false;
                 return;
             }
 
@@ -578,8 +719,25 @@ namespace CmdWatch
             }
             if (rec.AuthorName.Length == 0)
             {
-                ProcInfo dono = Processos != null ? Processos.Buscar(rec.OwnerPid) : null;
-                rec.AuthorName = dono != null && dono.Name.Length > 0 ? dono.Name : "?";
+                // o processo ainda nao passou pelo retrato: consulta dirigida
+                // (funciona tambem para processo elevado)
+                ProcInfo dir;
+                if (NativeProcess.TryGetProcessInfo(pid, out dir) && dir != null && dir.Name.Length > 0)
+                {
+                    rec.AuthorName = dir.Name;
+                    rec.AuthorCmdLine = dir.CmdLine;
+                }
+                else if (pid == rec.OwnerPid && !string.IsNullOrEmpty(rec.OwnerName))
+                {
+                    // se o PID escolhido nao esta na tabela, NAO emprestar o nome do
+                    // dono: isso misturava nome de um processo com PID de outro.
+                    // so reusa o dono quando o PID do autor E o do dono.
+                    rec.AuthorName = rec.OwnerName;
+                }
+                else
+                {
+                    rec.AuthorName = "?";
+                }
             }
         }
 
@@ -604,6 +762,14 @@ namespace CmdWatch
                 rec.Visible = true;
                 rec.HiddenAt = null;
                 LerDados(hwnd, rec);
+                // foco sem open previo: ainda assim resolve autor e cadeia
+                if (rec.AuthorPid <= 0)
+                {
+                    ResolverAutor(rec);
+                    AssociarTerminal(rec);
+                    MontarCadeia(rec);
+                }
+                if (rec.Auxiliar) return;
                 Notificar(rec, "focus");
             }
             catch { }
@@ -622,7 +788,7 @@ namespace CmdWatch
                 {
                     rec.Visible = false;
                     rec.HiddenAt = DateTime.Now;
-                    Notificar(rec, "hide");
+                    if (!rec.Auxiliar) Notificar(rec, "hide");
                 }
             }
             catch { }
@@ -642,7 +808,7 @@ namespace CmdWatch
                 {
                     rec.ClosedAt = DateTime.Now;
                     rec.Visible = false;
-                    Notificar(rec, "close");
+                    if (!rec.Auxiliar) Notificar(rec, "close");
                 }
             }
             catch { }
@@ -673,8 +839,12 @@ namespace CmdWatch
                     {
                         WindowRecord r = kv.Value;
                         if (r.ClosedAt.HasValue) { _lixo.Add(kv.Key); continue; }
+                        // janela so escondida (SW_HIDE): IsWindow continua
+                        // verdadeiro. Nao emitir close nem remover — ao
+                        // reaparecer, Registrar atualiza em vez de abrir de novo.
                         if (!vistas.Contains(kv.Key) && !r.Visible)
                         {
+                            if (IsWindow(kv.Key)) continue;
                             r.ClosedAt = DateTime.Now;
                             Notificar(r, "close");
                             _lixo.Add(kv.Key);
@@ -684,6 +854,135 @@ namespace CmdWatch
                 }
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Monta a cadeia de ancestrais do autor (pai -> avo...), hidratando a
+        /// linha de comando. Usa a tabela viva e o cache de processos
+        /// recem-encerrados do Watcher.
+        /// </summary>
+        private void MontarCadeia(WindowRecord rec)
+        {
+            rec.Chain.Clear();
+            if (Processos == null || rec.AuthorPid <= 0) return;
+            try
+            {
+                List<ProcInfo> cadeia = Processos.CadeiaDe(rec.AuthorPid, 8);
+                foreach (ProcInfo p in cadeia) rec.Chain.Add(p);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Windows Terminal expoe DUAS janelas top-level por aba: a Cascadia
+        /// (titulo, dono WindowsTerminal.exe) e a PseudoConsoleWindow (dono =
+        /// processo real). Liga as duas: a Pseudo vira auxiliar; a Cascadia
+        /// herda autor e cadeia do processo real.
+        /// </summary>
+        private void AssociarTerminal(WindowRecord rec)
+        {
+            try
+            {
+                if (rec.ClassName == "PseudoConsoleWindow")
+                {
+                    WindowRecord cascadia = AcharCascadiaProxima(rec);
+                    if (cascadia != null)
+                    {
+                        rec.Auxiliar = true;
+                        rec.LinkedHwnd = cascadia.Hwnd;
+                        // Cascadia herda o autor real
+                        if (rec.AuthorPid > 0 &&
+                            (cascadia.AuthorPid == cascadia.OwnerPid ||
+                             EhTerminalHost(cascadia.AuthorName)))
+                        {
+                            cascadia.AuthorPid = rec.AuthorPid;
+                            cascadia.AuthorName = rec.AuthorName;
+                            cascadia.AuthorCmdLine = rec.AuthorCmdLine;
+                            cascadia.AutorPeloConsole = true;
+                        }
+                    }
+                    return;
+                }
+
+                if (rec.ClassName == "CASCADIA_HOSTING_WINDOW_CLASS" || EhTerminalHost(rec.OwnerName))
+                {
+                    WindowRecord pseudo = AcharPseudoProxima(rec);
+                    if (pseudo != null)
+                    {
+                        pseudo.Auxiliar = true;
+                        pseudo.LinkedHwnd = rec.Hwnd;
+                        if (pseudo.AuthorPid > 0)
+                        {
+                            rec.AuthorPid = pseudo.AuthorPid;
+                            rec.AuthorName = pseudo.AuthorName;
+                            rec.AuthorCmdLine = pseudo.AuthorCmdLine;
+                            rec.AutorPeloConsole = true;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void PropagarAutorParaLigada(WindowRecord aux)
+        {
+            if (aux.LinkedHwnd == IntPtr.Zero) return;
+            WindowRecord alvo;
+            lock (_lock)
+            {
+                if (!_janelas.TryGetValue(aux.LinkedHwnd, out alvo)) return;
+            }
+            bool mudou = alvo.AuthorPid != aux.AuthorPid;
+            alvo.AuthorPid = aux.AuthorPid;
+            alvo.AuthorName = aux.AuthorName;
+            alvo.AuthorCmdLine = aux.AuthorCmdLine;
+            alvo.AutorPeloConsole = true;
+            MontarCadeia(alvo);
+            if (mudou) Notificar(alvo, "update");
+        }
+
+        private static bool EhTerminalHost(string nome)
+        {
+            if (string.IsNullOrEmpty(nome)) return false;
+            return nome.Equals("WindowsTerminal.exe", StringComparison.OrdinalIgnoreCase)
+                || nome.Equals("wt.exe", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private WindowRecord AcharCascadiaProxima(WindowRecord pseudo)
+        {
+            WindowRecord melhor = null;
+            double melhorDt = 2.0; // segundos
+            lock (_lock)
+            {
+                foreach (WindowRecord r in _janelas.Values)
+                {
+                    if (r.Hwnd == pseudo.Hwnd) continue;
+                    if (r.ClosedAt.HasValue) continue;
+                    if (r.ClassName != "CASCADIA_HOSTING_WINDOW_CLASS") continue;
+                    double dt = Math.Abs((r.FirstSeen - pseudo.FirstSeen).TotalSeconds);
+                    if (dt < melhorDt) { melhorDt = dt; melhor = r; }
+                }
+            }
+            return melhor;
+        }
+
+        private WindowRecord AcharPseudoProxima(WindowRecord cascadia)
+        {
+            WindowRecord melhor = null;
+            double melhorDt = 2.0;
+            lock (_lock)
+            {
+                foreach (WindowRecord r in _janelas.Values)
+                {
+                    if (r.Hwnd == cascadia.Hwnd) continue;
+                    if (r.ClosedAt.HasValue) continue;
+                    if (r.ClassName != "PseudoConsoleWindow") continue;
+                    if (EhTerminalHost(r.AuthorName) || EhTerminalHost(r.OwnerName)) continue;
+                    double dt = Math.Abs((r.FirstSeen - cascadia.FirstSeen).TotalSeconds);
+                    if (dt < melhorDt) { melhorDt = dt; melhor = r; }
+                }
+            }
+            return melhor;
         }
 
         private void Notificar(WindowRecord rec, string tipo)

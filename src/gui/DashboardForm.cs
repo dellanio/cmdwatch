@@ -613,7 +613,7 @@ namespace CmdWatch.Gui
                     CloseRow(ev.Session);
                     break;
                 case "window_open":
-                    _totalWindows++;
+                    if (ev.Window == null || !ev.Window.Auxiliar) _totalWindows++;
                     ApplyWindow(ev.Window);
                     break;
                 case "window_update":
@@ -651,6 +651,8 @@ namespace CmdWatch.Gui
         private void ApplyWindow(WindowRecord rec)
         {
             if (rec == null) return;
+            // PseudoConsole auxiliar do Windows Terminal: nao conta em dobro
+            if (rec.Auxiliar) return;
             try
             {
                 WindowRow r;
@@ -664,7 +666,16 @@ namespace CmdWatch.Gui
                 }
                 r.Title = rec.Title;
                 r.Author = (rec.AuthorName.Length > 0 ? rec.AuthorName : "?") + " (" + rec.AuthorPid + ")";
+                if (rec.Chain.Count > 0)
+                {
+                    ProcInfo pai = rec.Chain[0];
+                    if (pai != null && pai.Name.Length > 0)
+                        r.Author = r.Author + " <= " + pai.Name + "(" + pai.Pid + ")";
+                }
                 r.CmdLine = rec.AuthorCmdLine;
+                if (rec.Chain.Count > 0 && rec.Chain[0] != null && rec.Chain[0].CmdLine.Length > 0
+                    && (r.CmdLine == null || r.CmdLine.Length == 0))
+                    r.CmdLine = rec.Chain[0].CmdLine;
                 r.StartedAt = rec.FirstSeen;
                 r.Focus = rec.FocusCount;
                 r.Visible = rec.Visible;

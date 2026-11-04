@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.1.0";
+        internal const string Version = "1.1.1";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -118,6 +118,7 @@ opcoes do trace:
             watcher.IntervaloLentoMs = o.Interval;
             watcher.IntervaloRapidoMs = o.FastInterval > 0 ? o.FastInterval : 50;
             StreamWriter log = null;
+            object logLock = new object();
 
             if (!o.Quiet && o.LogPath != null)
             {
@@ -134,7 +135,7 @@ opcoes do trace:
             watcher.OnEvent = ev =>
             {
                 string json = ToJson(ev);
-                if (log != null) { try { log.WriteLine(json); } catch { } }
+                if (log != null) { lock (logLock) { try { log.WriteLine(json); } catch { } } }
                 if (o.Json) Console.WriteLine(json);
                 else RenderHuman(ev);
             };
@@ -508,13 +509,29 @@ opcoes do trace:
                 sb.Append("\"authorPid\":" + J.Num(w.AuthorPid) + ",");
                 sb.Append("\"author\":" + J.Str(w.AuthorName) + ",");
                 sb.Append("\"authorCmdLine\":" + J.Str(w.AuthorCmdLine) + ",");
+                sb.Append("\"programPid\":" + J.Num(w.ProgramPid) + ",");
+                sb.Append("\"program\":" + J.Str(w.ProgramName) + ",");
                 sb.Append("\"byConsole\":" + (w.AutorPeloConsole ? "true" : "false") + ",");
                 sb.Append("\"consoleClients\":" + J.Num(w.ConsoleClients.Count) + ",");
                 sb.Append("\"firstSeen\":" + J.Ts(w.FirstSeen) + ",");
                 sb.Append("\"durationMs\":" + J.Num((long)(w.DuracaoSeg * 1000)) + ",");
                 sb.Append("\"focusCount\":" + J.Num(w.FocusCount) + ",");
                 sb.Append("\"visible\":" + (w.Visible ? "true" : "false") + ",");
-                sb.Append("\"closed\":" + (w.Fechada ? "true" : "false"));
+                sb.Append("\"closed\":" + (w.Fechada ? "true" : "false") + ",");
+                sb.Append("\"auxiliary\":" + (w.Auxiliar ? "true" : "false"));
+                if (w.Chain.Count > 0)
+                {
+                    sb.Append(",\"chain\":[");
+                    for (int i = 0; i < w.Chain.Count; i++)
+                    {
+                        if (i > 0) sb.Append(",");
+                        sb.Append("{\"pid\":" + J.Num(w.Chain[i].Pid)
+                            + ",\"name\":" + J.Str(w.Chain[i].Name)
+                            + ",\"cmdLine\":" + J.Str(w.Chain[i].CmdLine)
+                            + ",\"sessionId\":" + J.Num(w.Chain[i].SessionId) + "}");
+                    }
+                    sb.Append("]");
+                }
                 sb.Append("}");
             }
             sb.Append("}");

@@ -109,6 +109,69 @@ namespace CmdWatch
     }
 
     /// <summary>Motor por consulta periodica a Win32_Process. Nao exige administracao.</summary>
+    /// <summary>
+    /// Sensor complementar (sem administrador): escuta a criacao de cmd.exe via
+    /// WMI __InstanceCreationEvent. O Win32_ProcessStartTrace exige admin; este
+    /// caminho nao. Acorda o polling e entrega o PID na hora - essencial para
+    /// .cmd ocultos e curtos (~25ms) que o retrato em 500ms perde quando a
+    /// maquina esta parada.
+    ///
+    /// O WITHIN 0.1 faz o servico WMI varrer a cada 100ms: bem mais barato que
+    /// baixar o intervalo do SnapshotFast para 50ms o tempo todo.
+    /// </summary>
+    internal sealed class CmdCreationSensor : IDisposable
+    {
+        private ManagementEventWatcher _watcher;
+        private Action<int> _onCmd;
+        private ManualResetEvent _wake;
+
+        public void Start(Action<int> onCmd, ManualResetEvent wake)
+        {
+            _onCmd = onCmd;
+            _wake = wake;
+            try
+            {
+                // WITHIN 0.1 = 100ms; filtra so cmd.exe para nao inundar
+                string q = "SELECT * FROM __InstanceCreationEvent WITHIN 0.1 "
+                    + "WHERE TargetInstance ISA 'Win32_Process' "
+                    + "AND TargetInstance.Name = 'cmd.exe'";
+                _watcher = new ManagementEventWatcher(new WqlEventQuery(q));
+                _watcher.EventArrived += OnEvent;
+                _watcher.Start();
+            }
+            catch
+            {
+                // sem permissao ou WMI indisponivel: o polling continua sozinho
+                try { if (_watcher != null) _watcher.Dispose(); } catch { }
+                _watcher = null;
+            }
+        }
+
+        private void OnEvent(object sender, EventArrivedEventArgs e)
+        {
+            try
+            {
+                ManagementBaseObject ti = (ManagementBaseObject)e.NewEvent["TargetInstance"];
+                if (ti == null) return;
+                int pid = PollingEngine.ToInt(ti["ProcessId"]);
+                if (pid <= 0) return;
+                try { if (_wake != null) _wake.Set(); } catch { }
+                Action<int> cb = _onCmd;
+                if (cb != null) cb(pid);
+            }
+            catch { }
+        }
+
+        public void Stop()
+        {
+            try { if (_watcher != null) _watcher.Stop(); } catch { }
+            try { if (_watcher != null) _watcher.Dispose(); } catch { }
+            _watcher = null;
+        }
+
+        public void Dispose() { Stop(); }
+    }
+
     internal sealed class PollingEngine : IEngine
     {
         public static bool Verbose;
@@ -118,6 +181,8 @@ namespace CmdWatch
         private readonly Dictionary<int, ProcInfo> _known = new Dictionary<int, ProcInfo>();
         private Thread _thread;
         private volatile bool _running;
+        private CmdCreationSensor _cmdSensor;
+        private Action<ProcInfo> _onStart;
 
         /// <summary>
         /// Sinal para acordar o motor na hora de um evento (uma janela nova).
@@ -155,10 +220,39 @@ namespace CmdWatch
         public void Start(Action<ProcInfo> onStart, Action<int> onExit)
         {
             _running = true;
+            _onStart = onStart;
             Seed();
+            // sensor WMI (sem admin): cmd.exe curto nao depende so do intervalo
+            try
+            {
+                _cmdSensor = new CmdCreationSensor();
+                _cmdSensor.Start(OnCmdCriado, Wake);
+            }
+            catch { _cmdSensor = null; }
             _thread = new Thread(() => Loop(onStart, onExit));
             _thread.IsBackground = true;
             _thread.Start();
+        }
+
+        /// <summary>cmd.exe nasceu: hidrata e processa sem esperar o proximo retrato.</summary>
+        private void OnCmdCriado(int pid)
+        {
+            if (pid <= 0 || _onStart == null) return;
+            try
+            {
+                ProcInfo pi;
+                if (!NativeProcess.TryGetProcessInfo(pid, out pi) || pi == null)
+                {
+                    pi = new ProcInfo();
+                    pi.Pid = pid;
+                    pi.Name = "cmd.exe";
+                }
+                if (pi.Name.Length == 0) pi.Name = "cmd.exe";
+                Hydrate(pi);
+                lock (_known) { _known[pid] = pi; }
+                _onStart(pi);
+            }
+            catch { }
         }
 
         private void Seed()
@@ -402,7 +496,12 @@ namespace CmdWatch
             catch { return DateTime.MinValue; }
         }
 
-        public void Stop() { _running = false; }
+        public void Stop()
+        {
+            _running = false;
+            try { if (_cmdSensor != null) _cmdSensor.Stop(); } catch { }
+            _cmdSensor = null;
+        }
         public void Dispose() { Stop(); }
     }
 
@@ -654,6 +753,14 @@ namespace CmdWatch
         private readonly Dictionary<int, ScriptFrame> _frames = new Dictionary<int, ScriptFrame>();
         private readonly Dictionary<int, BatchSession> _sessions = new Dictionary<int, BatchSession>();
         private readonly HashSet<int> _processados = new HashSet<int>();
+        /// <summary>
+        /// Processos que acabaram de sair. O Windows reutiliza PIDs; guardamos
+        /// o ProcInfo (com StartedAt e CmdLine) por alguns segundos para montar
+        /// a cadeia de uma janela cujo pai ja morreu.
+        /// </summary>
+        private readonly Dictionary<int, ProcInfo> _recent = new Dictionary<int, ProcInfo>();
+        private readonly Dictionary<int, DateTime> _recentExitAt = new Dictionary<int, DateTime>();
+        private static readonly TimeSpan RecentTtl = TimeSpan.FromSeconds(45);
         private readonly object _lock = new object();
 
         public Action<WatchEvent> OnEvent;
@@ -1243,8 +1350,15 @@ namespace CmdWatch
             bool closeSession = false;
             lock (_lock)
             {
+                ProcInfo morto;
+                if (_table.TryGetValue(pid, out morto))
+                {
+                    _recent[pid] = morto;
+                    _recentExitAt[pid] = DateTime.Now;
+                }
                 _table.Remove(pid);
                 _processados.Remove(pid);
+                ExpurgarRecentesLocked();
                 ScriptFrame frame;
                 if (_frames.TryGetValue(pid, out frame))
                 {
@@ -1274,13 +1388,22 @@ namespace CmdWatch
         private ProcInfo Lookup(int pid)
         {
             ProcInfo p;
-            lock (_lock) { _table.TryGetValue(pid, out p); }
+            lock (_lock)
+            {
+                ExpurgarRecentesLocked();
+                if (!_table.TryGetValue(pid, out p))
+                    _recent.TryGetValue(pid, out p);
+            }
             if (p != null)
             {
                 if (!p.Hydrated)
                 {
                     PollingEngine.HydrateProcess(p);
-                    lock (_lock) { _table[pid] = p; }
+                    lock (_lock)
+                    {
+                        if (_table.ContainsKey(pid)) _table[pid] = p;
+                        if (_recent.ContainsKey(pid)) _recent[pid] = p;
+                    }
                 }
                 return p;
             }
@@ -1394,7 +1517,67 @@ namespace CmdWatch
             while (cur != null && res.Count < max && guard.Add(cur.Pid))
             {
                 res.Add(cur);
-                cur = Lookup(cur.ParentPid);
+                int ppid = cur.ParentPid;
+                if (ppid <= 0) break;
+                ProcInfo pai = Lookup(ppid);
+                // PID reuse: o "pai" so vale se nasceu antes (ou no mesmo
+                // instante) do filho. Sem StartedAt, aceita com cautela.
+                if (pai != null && cur.StartedAt != DateTime.MinValue && pai.StartedAt != DateTime.MinValue
+                    && pai.StartedAt > cur.StartedAt.AddMilliseconds(50))
+                {
+                    break;
+                }
+                cur = pai;
+            }
+            return res;
+        }
+
+        private void ExpurgarRecentesLocked()
+        {
+            if (_recentExitAt.Count == 0) return;
+            DateTime limite = DateTime.Now - RecentTtl;
+            _lixoPid.Clear();
+            foreach (var kv in _recentExitAt)
+                if (kv.Value < limite) _lixoPid.Add(kv.Key);
+            foreach (int pid in _lixoPid)
+            {
+                _recent.Remove(pid);
+                _recentExitAt.Remove(pid);
+            }
+        }
+
+        private readonly List<int> _lixoPid = new List<int>();
+
+        /// <summary>
+        /// Cadeia de ancestrais a partir de um PID (usado pelo observador de
+        /// janelas). O proprio PID fica de fora: a lista comeca no pai.
+        /// Hidrata CmdLine de cada elo. Consulta tambem o cache de processos
+        /// recem-encerrados.
+        /// </summary>
+        public List<ProcInfo> CadeiaDe(int pid, int max)
+        {
+            var res = new List<ProcInfo>();
+            if (pid <= 0 || max <= 0) return res;
+            ProcInfo eu = Lookup(pid);
+            int ppid = eu != null ? eu.ParentPid : 0;
+            DateTime filhoInicio = eu != null ? eu.StartedAt : DateTime.MinValue;
+            var guard = new HashSet<int>();
+            if (eu != null) guard.Add(eu.Pid);
+
+            while (ppid > 0 && res.Count < max && guard.Add(ppid))
+            {
+                ProcInfo pai = Lookup(ppid);
+                if (pai == null) break;
+                if (filhoInicio != DateTime.MinValue && pai.StartedAt != DateTime.MinValue
+                    && pai.StartedAt > filhoInicio.AddMilliseconds(50))
+                    break;
+                if (!pai.Hydrated || pai.CmdLine.Length == 0)
+                {
+                    try { PollingEngine.HydrateProcess(pai); } catch { }
+                }
+                res.Add(pai);
+                filhoInicio = pai.StartedAt != DateTime.MinValue ? pai.StartedAt : filhoInicio;
+                ppid = pai.ParentPid;
             }
             return res;
         }

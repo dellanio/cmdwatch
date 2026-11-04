@@ -131,6 +131,7 @@ namespace CmdWatch
             { "winCloseTitle",    new[] { "JANELA FECHADA",     "WINDOW CLOSED" } },
             { "fOwner",           new[] { "dono",     "owner" } },
             { "fAuthor",          new[] { "autor",    "author" } },
+            { "fProgram",         new[] { "programa", "program" } },
             { "fConsole",         new[] { "console",  "console" } },
             { "fDuration",        new[] { "duracao",  "duration" } },
             { "fFocusCount",      new[] { "foco",     "focus" } },
