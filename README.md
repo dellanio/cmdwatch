@@ -2,6 +2,8 @@
 
 **[Português](#português) | [English](#english)**
 
+> **In English:** Started using AI agents at scale and CMD windows keep popping up? AI agents run lots of scripts, often in visible console windows, and you can't tell where they come from. CMDWatcher shows who opened each console and window (the author process, its ancestor chain and the command line), so you can find the root cause and monitor your computer whenever you need. It gives you the evidence; it does not automatically label anything as "AI" or "operating system".
+
 ![Painel do cmdwatch](docs/dashboard.png)
 
 ---
@@ -193,6 +195,18 @@ componentes de terceiros. Aceita as opções do `monitor` (`--filter`, `--interv
 - **Idioma:** a troca PT-BR/EN é imediata e fica salva em `%APPDATA%\cmdwatch\ui.cfg`. As
   explicações dos comandos vêm do dicionário compartilhado com a CLI e continuam em
   português.
+- **Limpar sessões:** o botão **Limpar** no cartão *Sessões CMD* esvazia a lista e passa a
+  mostrar só as sessões que abrirem **a partir daquele momento**. As sessões que já estavam
+  na lista não voltam, nem se continuarem rodando. Nada é encerrado, o log e o
+  monitoramento seguem iguais, e o fluxo de comandos tem o seu próprio botão de limpar
+  (`F5`). O indicador *Sessões ativas* passa a contar só as sessões da lista.
+- **Recolher e expandir cartões:** a seta no canto direito de cada cartão (*Sessões CMD*,
+  *Janelas detectadas*, *Fluxo de comandos*, *Atividade*) recolhe o cartão numa linha só;
+  clique de novo para abrir. Os outros cartões ocupam o espaço liberado. O estado fica
+  salvo em `%APPDATA%\cmdwatch\ui.cfg` e volta igual na próxima vez.
+
+  ![Cartão Janelas detectadas recolhido](docs/recolhido.png)
+
 - A janela do próprio cmdwatch não entra na lista.
 
 Para ver o painel em ação: `demo\gui-demo.cmd` dispara uma sequência de comandos (inclusive
@@ -666,6 +680,18 @@ third-party components. It accepts the `monitor` options (`--filter`, `--interva
   area and monitoring continues (click the icon to restore, right-click to exit).
 - **Language:** switching PT-BR/EN is immediate and saved in `%APPDATA%\cmdwatch\ui.cfg`.
   Command explanations come from the dictionary shared with the CLI and stay in Portuguese.
+- **Clear sessions:** the **Clear** button on the *CMD sessions* card empties the list and
+  from then on shows only sessions that start **after that moment**. Sessions that were
+  already listed do not come back, even if they keep running. Nothing is terminated, the
+  log and monitoring are unaffected, and the command flow has its own clear button (`F5`).
+  The *Active sessions* indicator then counts only the sessions in the list.
+- **Collapse and expand cards:** the chevron at the right of each card (*CMD sessions*,
+  *Detected windows*, *Command flow*, *Activity*) collapses the card to a single line;
+  click again to open it. The other cards take the freed space. The state is saved in
+  `%APPDATA%\cmdwatch\ui.cfg` and restored next time.
+
+  ![Detected windows card collapsed](docs/recolhido.png)
+
 - cmdwatch's own window is not listed.
 
 To see the panel in action: `demo\gui-demo.cmd` runs a sequence of commands (including a

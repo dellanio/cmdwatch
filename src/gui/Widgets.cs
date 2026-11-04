@@ -216,6 +216,19 @@ namespace CmdWatch.Gui
                     ChevFont);
         }
 
+        // acessibilidade: o botao aparece como "botao" e pode ser acionado pelo
+        // leitor de tela / UI Automation (Invoke), como um Button comum
+        protected override AccessibleObject CreateAccessibilityInstance() { return new Acesso(this); }
+        private sealed class Acesso : ControlAccessibleObject
+        {
+            private readonly IconButton _b;
+            public Acesso(IconButton b) : base(b) { _b = b; }
+            public override AccessibleRole Role { get { return AccessibleRole.PushButton; } }
+            public override string DefaultAction { get { return "Press"; } }
+            public override string Name { get { return _b.Text; } set { } }
+            public override void DoDefaultAction() { if (_b.Enabled) _b.OnClick(EventArgs.Empty); }
+        }
+
         protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hot = true; Invalidate(); }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hot = false; Invalidate(); }
 

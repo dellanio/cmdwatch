@@ -54,6 +54,13 @@ namespace CmdWatch.Gui
         private SideBar _side;
         private SearchBox _busca, _buscaFluxo;
         private IconButton _btnPausa, _btnFiltro, _btnSessao, _btnCopiar, _btnLimpar, _btnFaixa, _btnIdioma;
+        private IconButton _btnLimparSess;
+        // recolher/expandir cada cartao: botao de seta no cabecalho; chave salva em ui.cfg
+        private readonly Dictionary<NeonPanel, IconButton> _chev = new Dictionary<NeonPanel, IconButton>();
+        private readonly Dictionary<NeonPanel, string> _chave = new Dictionary<NeonPanel, string>();
+        private readonly HashSet<string> _recolhidos = new HashSet<string>();
+        // "Limpar" das sessoes: sessoes ja vistas (pid + inicio do cmd) deixam de ser mostradas
+        private readonly Dictionary<int, DateTime> _limpas = new Dictionary<int, DateTime>();
         private IconButton _navHome, _navLog, _navGrafico, _navConfig;
         private NotifyIcon _tray;
         private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
@@ -165,6 +172,21 @@ namespace CmdWatch.Gui
             _btnCopiar = Botao(_pStream, "\uE8C8", "", false, delegate { CopiarFluxo(); });
             _btnLimpar = Botao(_pStream, "\uE74D", "", false, delegate { LimparFluxo(); });
             _btnFaixa = Botao(_pActivity, "", "", true, delegate { MenuFaixa(_btnFaixa); });
+            _btnLimparSess = Botao(_pSessions, "\uE894", "", false, delegate { LimparSessoes(); });
+            _btnLimparSess.Name = _btnLimparSess.Text = "btnLimparSessoes";
+
+            // seta de recolher em todos os cartoes (nomes estaveis para a automacao de UI)
+            _chave[_pSessions] = "sessoes"; _chave[_pWindows] = "janelas";
+            _chave[_pStream] = "fluxo"; _chave[_pActivity] = "atividade";
+            CarregarRecolhidos();
+            foreach (KeyValuePair<NeonPanel, string> c in _chave)
+            {
+                NeonPanel np = c.Key;
+                np.Name = np.Text = "cartao_" + c.Value;
+                IconButton b = Botao(np, "", "", false, delegate { AlternarRecolher(np); });
+                b.Name = b.Text = "recolher_" + c.Value;
+                _chev[np] = b;
+            }
 
             // rodape
             _checkTray = new NeonCheckBox();
@@ -212,6 +234,15 @@ namespace CmdWatch.Gui
             _btnSessao.Label = Lang.F("v2FlowSess", NomeSessao(_selectedPid));
             _btnCopiar.Tip = Lang.T("v2Copy");
             _btnLimpar.Tip = Lang.T("v2Clear");
+            _btnLimparSess.Label = Lang.T("v2ClearSess");
+            _btnLimparSess.Tip = Lang.T("v2ClearSessTip");
+            foreach (KeyValuePair<NeonPanel, IconButton> c in _chev)
+            {
+                bool rec = Recolhido(c.Key);
+                c.Value.Glyph = rec ? "\uE70D" : "\uE70E";   // seta para baixo = expandir; para cima = recolher
+                c.Value.Tip = Lang.T(rec ? "v2Expand" : "v2Collapse");
+                c.Value.Invalidate();
+            }
             _btnFaixa.Label = Lang.F("v2Range", _activity.Capacity);
             _checkTray.Label = Lang.T("v2Tray");
             _btnIdioma.Label = Lang.Atual == Idioma.En ? "EN" : "PT-BR";
@@ -247,22 +278,45 @@ namespace CmdWatch.Gui
 
             int resto = h - FootH - Gap - y;
             int minT = cab + 26 + 2 * 24 + 6;        // cabecalho + colunas + 2 linhas
-            int sessH = Math.Max(minT, (int)(resto * 0.25));
-            int winH = Math.Max(minT, (int)(resto * 0.30));
-            int midH = Math.Max(130, resto - sessH - winH - Gap * 2);
+            // cartao recolhido = so a linha do cabecalho; os abertos dividem o espaco livre
+            bool cS = Recolhido(_pSessions), cW = Recolhido(_pWindows), cF = Recolhido(_pStream), cA = Recolhido(_pActivity);
+            bool midAberto = !(cF && cA);
+            int midExtra = cF != cA ? cab + Gap : 0;  // um dos dois de baixo recolhido: vira faixa acima do outro
+            int fixo = (cS ? cab : 0) + (cW ? cab : 0) + (midAberto ? 0 : cab);
+            double peso = (cS ? 0 : 0.25) + (cW ? 0 : 0.30) + (midAberto ? 0.45 : 0);
+            int livre = Math.Max(0, resto - fixo - midExtra);
+            if (peso <= 0) peso = 1;
+            int sessH = cS ? cab : Math.Max(minT, (int)(livre * 0.25 / peso));
+            int winH = cW ? cab : Math.Max(minT, (int)(livre * 0.30 / peso));
+            int midH = midAberto ? Math.Max(130, resto - sessH - winH - Gap * 2 - midExtra) : cab;
             _pSessions.SetBounds(x0, y, cw, sessH);
             y += sessH + Gap;
             _pWindows.SetBounds(x0, y, cw, winH);
             y += winH + Gap;
-            int flowW = (int)((cw - Gap) * 0.64);
-            _pStream.SetBounds(x0, y, flowW, midH);
-            _pActivity.SetBounds(x0 + flowW + Gap, y, cw - flowW - Gap, midH);
+            if (cF == cA)
+            {
+                int flowW = (int)((cw - Gap) * 0.64);
+                _pStream.SetBounds(x0, y, flowW, midH);
+                _pActivity.SetBounds(x0 + flowW + Gap, y, cw - flowW - Gap, midH);
+            }
+            else
+            {
+                NeonPanel fechado = cF ? _pStream : _pActivity, aberto = cF ? _pActivity : _pStream;
+                fechado.SetBounds(x0, y, cw, cab);
+                aberto.SetBounds(x0, y + cab + Gap, cw, midH);
+            }
+            _sessions.Visible = !cS; _windows.Visible = !cW; _stream.Visible = !cF; _activity.Visible = !cA;
 
-            // controles dos cabecalhos dos cartoes (alinhados a direita)
+            // controles dos cabecalhos dos cartoes (alinhados a direita; a seta fica no canto)
             int hb = 26, hy = (_pSessions.HeaderHeight - hb) / 2;
+            foreach (KeyValuePair<NeonPanel, IconButton> c in _chev)
+                c.Value.SetBounds(c.Key.Width - 12 - hb, hy, hb, hb);
+            int dir = 12 + hb + 8;
             int fw = Math.Max(140, _btnFiltro.PreferredW());
-            _btnFiltro.SetBounds(_pSessions.Width - 12 - fw, hy, fw, hb);
-            int fx = _pStream.Width - 12;
+            _btnFiltro.SetBounds(_pSessions.Width - dir - fw, hy, fw, hb);
+            int lsw = _btnLimparSess.PreferredW() + 4;
+            _btnLimparSess.SetBounds(_btnFiltro.Left - 8 - lsw, hy, lsw, hb);
+            int fx = _pStream.Width - dir;
             _btnLimpar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 6;
             _btnCopiar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 10;
             int qw = Math.Min(170, Math.Max(90, _pStream.Width / 5));
@@ -271,7 +325,7 @@ namespace CmdWatch.Gui
             ssw = Math.Min(ssw, fx - 170);
             _btnSessao.SetBounds(fx - ssw, hy, Math.Max(60, ssw), hb);
             int rw = _btnFaixa.PreferredW();
-            _btnFaixa.SetBounds(_pActivity.Width - 12 - rw, hy, rw, hb);
+            _btnFaixa.SetBounds(_pActivity.Width - dir - rw, hy, rw, hb);
 
             foreach (var par in new KeyValuePair<NeonPanel, Control>[] {
                 new KeyValuePair<NeonPanel, Control>(_pSessions, _sessions),
@@ -466,6 +520,51 @@ namespace CmdWatch.Gui
         {
             _entries.Clear();
             _stream.ClearFlow();
+        }
+
+        /// <summary>
+        /// "Limpar" do cartao Sessoes CMD: esconde todas as sessoes listadas ate
+        /// agora (abertas ou encerradas) e passa a mostrar so as que abrirem
+        /// depois do clique. Nao encerra processos, nao mexe no log nem no
+        /// monitor; o fluxo de comandos tem o seu proprio "Limpar". Uma sessao
+        /// escondida que continue rodando nao volta (mesmo pid e mesmo inicio).
+        /// O contador "ativas" passa a contar so as sessoes mostradas.
+        /// </summary>
+        private void LimparSessoes()
+        {
+            foreach (SessionRow r in _rows) _limpas[r.Pid] = r.CmdStartedAt;
+            _rows.Clear();
+            _rowByPid.Clear();
+            _totalSessions = 0; _totalCalls = 0;
+            if (_selectedPid != 0) { _sessions.SetSelection(0); _selectedPid = 0; }
+            ApplyTexts();
+            OnSlowTick(null, EventArgs.Empty);
+            ShowNotice(Lang.F("v2ClearedSess", DateTime.Now.ToString("HH:mm:ss")), Theme.Teal, 5);
+        }
+
+        private bool Recolhido(NeonPanel np)
+        {
+            string k;
+            return _chave.TryGetValue(np, out k) && _recolhidos.Contains(k);
+        }
+
+        /// <summary>Seta do cabecalho: recolhe o cartao numa linha ou volta a abri-lo.</summary>
+        private void AlternarRecolher(NeonPanel np)
+        {
+            string k;
+            if (!_chave.TryGetValue(np, out k)) return;
+            if (!_recolhidos.Remove(k)) _recolhidos.Add(k);
+            Lang.SetCfg("recolhidos", string.Join(",", _recolhidos.OrderBy(s => s)));
+            ApplyTexts();
+            LayoutDashboard();
+            foreach (NeonPanel p in _chave.Keys) p.Invalidate(true);
+        }
+
+        private void CarregarRecolhidos()
+        {
+            string v = Lang.GetCfg("recolhidos");
+            foreach (string s in v.Split(','))
+                if (_chave.ContainsValue(s.Trim())) _recolhidos.Add(s.Trim());
         }
 
         /// <summary>Engrenagem: mostra a configuracao em uso (somente leitura).</summary>
@@ -922,6 +1021,8 @@ namespace CmdWatch.Gui
         {
             if (s == null) return;
             if (_rowByPid.ContainsKey(s.CmdPid)) return;
+            DateTime limpa;
+            if (_limpas.TryGetValue(s.CmdPid, out limpa) && limpa == s.CmdStartedAt) return;   // escondida pelo "Limpar"
             SessionRow r = new SessionRow();
             r.Pid = s.CmdPid;
             r.Script = s.ScriptName;
@@ -950,7 +1051,7 @@ namespace CmdWatch.Gui
         {
             if (s == null) return;
             SessionRow r;
-            if (!_rowByPid.TryGetValue(s.CmdPid, out r)) return;
+            if (!_rowByPid.TryGetValue(s.CmdPid, out r)) { _limpas.Remove(s.CmdPid); return; }
             r.Closed = true;
             r.ClosedAt = DateTime.Now;
             r.Steps = s.StepCount;
@@ -1065,6 +1166,9 @@ namespace CmdWatch.Gui
                                       .OrderByDescending(r => r.StartedAt).ToList();
                 _sessions.Invalidate();
                 _pSessions.TitleValue = _sessions.Rows.Count.ToString();
+                string ts = "cartao_sessoes|linhas=" + _sessions.Rows.Count + "|" +   // lido pela automacao de UI
+                            string.Join(",", _sessions.Rows.Take(12).Select(r => r.Script));
+                if (_pSessions.Text != ts) _pSessions.Text = ts;
                 _pSessions.Invalidate();
 
                 // a tabela de janelas: duracao correndo e estado atual

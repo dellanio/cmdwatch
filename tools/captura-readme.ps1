@@ -5,7 +5,7 @@ param([string]$Exe = "$PSScriptRoot\..\out\cmdwatch.exe", [string]$Dest = "$PSSc
       [int]$HeaderH = 26, [int]$RowH = 24)
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
-if (-not ('PW' -as [type])) { Add-Type -ReferencedAssemblies System.Drawing @"
+if (-not ('PW' -as [type])) { Add-Type -ReferencedAssemblies System.Drawing, Accessibility @"
 using System; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;
 public static class PW {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
@@ -61,6 +61,12 @@ public static class PW {
     if (melhor == IntPtr.Zero) return false;
     SendMessage(melhor, 0x000C, IntPtr.Zero, texto); return true;
   }
+  [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object o);
+  // aciona um botao do painel pela acao padrao (sem mover o mouse)
+  public static void Acionar(IntPtr h) {
+    Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); object o;
+    if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref iid, out o) == 0 && o != null) ((Accessibility.IAccessible)o).accDoDefaultAction(0);
+  }
   public static void Clique(IntPtr h, uint down, uint up, int x, int y, int mk) {
     IntPtr lp = (IntPtr)((y << 16) | (x & 0xFFFF));
     PostMessage(h, down, (IntPtr)mk, lp); PostMessage(h, up, IntPtr.Zero, lp);
@@ -75,6 +81,9 @@ $demo = Join-Path (Resolve-Path "$PSScriptRoot\..").Path '.build\exemplo'
 New-Item -ItemType Directory -Force $demo | Out-Null
 Set-Content (Join-Path $demo 'exemplo-backup.cmd') "@echo off`r`ntitle exemplo - backup noturno`r`necho copiando relatorios`r`nwhere git`r`nping -n 3 127.0.0.1 >nul`r`ndir /b`r`nping -n 60 127.0.0.1 >nul" -Encoding ASCII
 Set-Content (Join-Path $demo 'exemplo-sincroniza.cmd') "@echo off`r`necho sincronizando`r`nwhere cmd`r`nping -n 2 127.0.0.1 >nul`r`ngit --version`r`nping -n 60 127.0.0.1 >nul" -Encoding ASCII
+# captura em PT-BR com os cartoes abertos: guarda o ui.cfg e o ajusta (restaurado no final)
+$cfg = Join-Path $env:APPDATA 'cmdwatch\ui.cfg'; $cfgAntes = if (Test-Path $cfg) { [IO.File]::ReadAllText($cfg) } else { $null }
+$cfgNovo = @(@(if ($cfgAntes -ne $null) { $cfgAntes -split "`r?`n" }) | Where-Object { $_ -and $_ -notmatch '^(recolhidos|lang)=' }) + 'lang=pt-br'; New-Item -ItemType Directory -Force (Split-Path $cfg) | Out-Null; [IO.File]::WriteAllText($cfg, ($cfgNovo -join "`r`n"))
 $g = Start-Process $Exe -ArgumentList 'gui', '--quiet' -PassThru
 for ($i = 0; $i -lt 40 -and $g.MainWindowHandle -eq 0; $i++) { Start-Sleep -Milliseconds 250; $g.Refresh() }
 Start-Sleep 3
@@ -121,5 +130,14 @@ if ($m.Count) {
   else { 'dialogo nao abriu' }
 } else { 'menu nao abriu' }
 Start-Sleep 1
+# cartao "Janelas detectadas" recolhido numa linha (seta do cabecalho) e aberto de novo
+$rec = [PW]::Filho($h, 'recolher_janelas')
+if ($rec -ne [IntPtr]::Zero) {
+  [PW]::Acionar($rec); Start-Sleep -Milliseconds 1200
+  [PW]::Shot($h, (Join-Path $Dest 'recolhido.png')); 'ok: recolhido'
+  [PW]::Acionar($rec); Start-Sleep -Milliseconds 600
+} else { 'seta de recolher nao encontrada' }
+Start-Sleep 1
 try { $g.CloseMainWindow() | Out-Null; if (-not $g.WaitForExit(4000)) { $g.Kill() } } catch {}
 foreach ($p in @($v, $o)) { try { if (-not $p.HasExited) { Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id)" | % { Stop-Process -Id $_.ProcessId -Force -EA 0 }; $p.Kill() } } catch {} }
+if ($cfgAntes -ne $null) { [IO.File]::WriteAllText($cfg, $cfgAntes) } else { Remove-Item $cfg -EA 0 }

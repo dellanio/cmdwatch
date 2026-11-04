@@ -412,3 +412,22 @@ Cerca de +1 ponto. A diferença minimizada também aparece, embora o painel mini
 
 ### Incidente: encerramento amplo
 - Numa captura anterior (rodada do README) rodei `Get-Process cmdwatch | Stop-Process -Force`, contra a regra de só encerrar processos dos próprios testes. As verificações logo antes não mostravam cmdwatch aberto, então provavelmente nada foi encerrado, mas o comando não devia ter sido usado. Nesta rodada os testes só encerram PIDs que iniciaram (ou processos com a marca única do teste na linha de comando).
+
+## Adendo: botões Limpar e recolher/expandir (04/11/2026)
+
+**Pedido:** um botão para limpar as sessões CMD e ver só as novas a partir daquele momento, e um botão em cada cartão para recolhê-lo numa linha (para minimizar *Janelas detectadas*).
+
+**O que mudou**
+- `src/gui/DashboardForm.cs`: botão **Limpar** no cabeçalho de *Sessões CMD*; seta de recolher/expandir nos quatro cartões; layout redistribui o espaço; estado salvo em `ui.cfg` (`recolhidos=`).
+- `src/Lang.cs`: textos PT-BR/EN; `ui.cfg` agora guarda várias chaves (`GetCfg`/`SetCfg`) sem apagar o idioma.
+- `src/gui/Widgets.cs`: `IconButton` expõe papel de botão e ação padrão (acessibilidade/UI Automation).
+- `tools/test-limpar-recolher.ps1` (novo) e `tools/captura-readme.ps1` (captura `docs/recolhido.png`, força PT-BR e cartões abertos e restaura o `ui.cfg`).
+
+**Semântica do Limpar:** esconde as sessões listadas até o clique (pid + início do cmd) e mostra só as que abrirem depois. Sessão escondida que continua rodando não volta. Não encerra processos, não mexe no log nem no motor; *Sessões ativas* conta só a lista. O fluxo de comandos não é afetado.
+
+**Testes executados**
+- `test-limpar-recolher.ps1`: 11/11 em 3 rodadas. Lista 0 linhas logo após Limpar e 3 s depois; sessões limpas continuam vivas; só a sessão nova aparece; log segue gravando. Recolher *Janelas detectadas*: 193 → 40 px, Sessões 161 → 216 px, Fluxo/Atividade 272 → 370 px; continua recolhido após reiniciar; expandir volta a 193/161/272.
+- `test-painel.ps1`: FECHAR, D5-painel, MASCARA-painel e FECHAR-velho passaram.
+- CPU do painel parado: 5,4% de um núcleo (versão anterior medida junto: 5,1%); rajada 20,1% (anterior 25,7%).
+
+**Não testado:** clique físico com o mouse (o teste aciona os botões pela acessibilidade; o clique normal usa o mesmo código).

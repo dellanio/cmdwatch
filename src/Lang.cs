@@ -61,6 +61,11 @@ namespace CmdWatch
             { "v2FlowSearch", new[] { "Buscar no fluxo...", "Search the flow..." } },
             { "v2Copy", new[] { "Copiar o fluxo exibido", "Copy the shown flow" } },
             { "v2Clear", new[] { "Limpar o fluxo (F5)", "Clear the flow (F5)" } },
+            { "v2ClearSess", new[] { "Limpar", "Clear" } },
+            { "v2ClearSessTip", new[] { "Limpar a lista: mostrar s\u00f3 as sess\u00f5es que abrirem a partir de agora", "Clear the list: show only sessions that start from now on" } },
+            { "v2ClearedSess", new[] { "Sess\u00f5es limpas: mostrando as que abrirem a partir de {0}", "Sessions cleared: showing those that start from {0}" } },
+            { "v2Collapse", new[] { "Recolher", "Collapse" } },
+            { "v2Expand", new[] { "Expandir", "Expand" } },
             { "v2Copied", new[] { "Fluxo copiado ({0} linhas)", "Flow copied ({0} lines)" } },
             { "v2Activity", new[] { "Atividade", "Activity" } },
             { "v2Range", new[] { "Últimos {0} s", "Last {0} s" } },
@@ -259,7 +264,40 @@ namespace CmdWatch
                 string p = ConfigPath;
                 string dir = Path.GetDirectoryName(p);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(p, "lang=" + (Atual == Idioma.En ? "en" : "pt-br") + Environment.NewLine);
+                SetCfg("lang", Atual == Idioma.En ? "en" : "pt-br");
+            }
+            catch { }
+        }
+
+        /// <summary>Valor de uma chave do ui.cfg ("" se ausente).</summary>
+        public static string GetCfg(string chave)
+        {
+            try
+            {
+                string p = ConfigPath;
+                if (!File.Exists(p)) return "";
+                foreach (string line in File.ReadAllLines(p))
+                    if (line.StartsWith(chave + "=", StringComparison.OrdinalIgnoreCase))
+                        return line.Substring(chave.Length + 1).Trim();
+            }
+            catch { }
+            return "";
+        }
+
+        /// <summary>Grava uma chave no ui.cfg preservando as demais linhas.</summary>
+        public static void SetCfg(string chave, string valor)
+        {
+            try
+            {
+                string p = ConfigPath;
+                string dir = Path.GetDirectoryName(p);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                var linhas = new System.Collections.Generic.List<string>();
+                if (File.Exists(p))
+                    foreach (string line in File.ReadAllLines(p))
+                        if (line.Trim().Length > 0 && !line.StartsWith(chave + "=", StringComparison.OrdinalIgnoreCase)) linhas.Add(line);
+                linhas.Add(chave + "=" + valor);
+                File.WriteAllLines(p, linhas);
             }
             catch { }
         }
