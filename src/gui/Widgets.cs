@@ -54,6 +54,9 @@ namespace CmdWatch.Gui
         public bool ByConsole;
         /// <summary>Nome do executavel autor (coluna "Processo") e o processo pai ("Processo de origem").</summary>
         public string AuthorName = "";
+        public int AuthorPid;
+        public DateTime AuthorStartedAt = DateTime.MinValue;
+        public string OriginTip = "";
         public string Origin = "";
 
         /// <summary>Quanto tempo a janela ficou na tela (correndo enquanto aberta).</summary>
@@ -1015,13 +1018,18 @@ namespace CmdWatch.Gui
     /// <summary>
     /// Tabela de janelas: processo autor (com o ponto de estado), titulo/caminho
     /// da janela em fonte monoespacada, processo de origem, duracao e estado.
+    /// Clique no cabecalho ordena a coluna (crescente / decrescente).
     /// </summary>
     internal sealed class WindowTable : TabelaBase
     {
         public List<WindowRow> Rows = new List<WindowRow>();
+        /// <summary>Botao direito numa linha: hwnd da janela e ponto na tela.</summary>
+        public event Action<IntPtr, Point> ContextRequested;
         protected override int Count { get { return Rows.Count; } }
 
-        private static readonly int[] Larg = { 150, 300, 200, 90, 110 };
+        private static readonly int[] Larg = { 140, 240, 270, 90, 110 };
+        private readonly ToolTip _originTip = new ToolTip { AutoPopDelay = 30000, InitialDelay = 400, ReshowDelay = 100 };
+        private string _tipText = "";
         /// <summary>Coluna ativa do sort do usuario; -1 = padrao (StartedAt decrescente).</summary>
         private int _sortCol = -1;
         private bool _sortAsc = true;
@@ -1075,24 +1083,41 @@ namespace CmdWatch.Gui
         {
             base.OnMouseMove(e);
             Cursor = e.Y < HeaderH ? Cursors.Hand : Cursors.Default;
+            int[] xs = Xs(Larg, 1, 30);
+            string text = _hover >= 0 && _hover < Rows.Count && e.X >= xs[2] && e.X < xs[3]
+                ? Rows[_hover].OriginTip : "";
+            if (text != _tipText) { _tipText = text; _originTip.SetToolTip(this, text); }
         }
-
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
             Cursor = Cursors.Default;
+            _tipText = ""; _originTip.SetToolTip(this, "");
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _originTip.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left || e.Y >= HeaderH) return;
-            int col = ColunaEm(e.X);
-            if (col < 0) return;
-            if (_sortCol == col) _sortAsc = !_sortAsc;
-            else { _sortCol = col; _sortAsc = true; }
-            Rows = Ordenar(Rows);
-            Invalidate();
+            if (e.Button == MouseButtons.Left && e.Y < HeaderH)
+            {
+                int col = ColunaEm(e.X);
+                if (col < 0) return;
+                if (_sortCol == col) _sortAsc = !_sortAsc;
+                else { _sortCol = col; _sortAsc = true; }
+                Rows = Ordenar(Rows);
+                Invalidate();
+                return;
+            }
+            if (e.Button != MouseButtons.Right) return;
+            int idx = (e.Y - HeaderH) / RowHeight;
+            bool onRow = e.Y >= HeaderH && idx >= 0 && _scroll + idx < Rows.Count;
+            if (onRow && ContextRequested != null)
+                ContextRequested(Rows[_scroll + idx].Hwnd, PointToScreen(e.Location));
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1104,7 +1129,7 @@ namespace CmdWatch.Gui
                 Lang.T("v2ColDur"), Lang.T("v2ColStatus")
             };
             if (_sortCol >= 0 && _sortCol < titulos.Length)
-                titulos[_sortCol] = titulos[_sortCol] + (_sortAsc ? " \u25b2" : " \u25bc");
+                titulos[_sortCol] = titulos[_sortCol] + (_sortAsc ? " ▲" : " ▼");
             Cabecalho(g, titulos, xs);
             if (Rows.Count == 0) { Vazio(g, Lang.T("v2NoWindows")); return; }
 

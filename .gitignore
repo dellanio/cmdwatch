@@ -16,3 +16,11 @@ __cmdwatch_trace_*.cmd
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Backups locais
+.backup*/
+
+# Capturas intermediarias de teste
+docs/screens/*
+!docs/screens/painel-v2.png
+

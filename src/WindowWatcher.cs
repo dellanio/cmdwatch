@@ -19,6 +19,8 @@ namespace CmdWatch
         public int AuthorPid;
         public string AuthorName = "";
         public string AuthorCmdLine = "";
+        /// <summary>Hora de inicio do autor (para o encerramento seguro pelo painel).</summary>
+        public DateTime AuthorStartedAt = DateTime.MinValue;
         /// <summary>
         /// O programa que esta rodando na janela agora (o cliente mais novo do
         /// console). Quando ha um intermediario - um script que chamou um
@@ -823,6 +825,7 @@ namespace CmdWatch
             rec.AuthorPid = pid;
             rec.AuthorName = "";
             rec.AuthorCmdLine = "";
+            rec.AuthorStartedAt = DateTime.MinValue;
             if (pid <= 0) { rec.AuthorName = "?"; return; }
             if (Processos != null)
             {
@@ -831,6 +834,7 @@ namespace CmdWatch
                 {
                     rec.AuthorName = pi.Name;
                     rec.AuthorCmdLine = pi.CmdLine;
+                    rec.AuthorStartedAt = pi.StartedAt;
                 }
             }
             if (rec.AuthorName.Length == 0)
@@ -842,6 +846,7 @@ namespace CmdWatch
                 {
                     rec.AuthorName = dir.Name;
                     rec.AuthorCmdLine = dir.CmdLine;
+                    rec.AuthorStartedAt = dir.StartedAt;
                 }
                 else if (pid == rec.OwnerPid && !string.IsNullOrEmpty(rec.OwnerName))
                 {

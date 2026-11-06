@@ -142,6 +142,7 @@ namespace CmdWatch.Gui
 
             _windows = new WindowTable();
             _windows.Name = _windows.Text = "tabelaJanelas";
+            _windows.ContextRequested += OnWindowContext;
             _pWindows.Controls.Add(_windows);
 
             _stats = new StatStrip();
@@ -868,6 +869,62 @@ namespace CmdWatch.Gui
             }
         }
 
+        private void OnWindowContext(IntPtr hwnd, Point screenPoint)
+        {
+            WindowRow r;
+            if (!_winByHwnd.TryGetValue(hwnd, out r)) return;
+            _ctxMenu.Items.Clear();
+            string nome = r.AuthorName.Length > 0 ? r.AuthorName : "?";
+            ToolStripMenuItem head = new ToolStripMenuItem(nome + "   (PID " + r.AuthorPid + ")");
+            head.Enabled = false;
+            _ctxMenu.Items.Add(head);
+            _ctxMenu.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem encerrar = new ToolStripMenuItem(Lang.T("menuCloseWin"));
+            encerrar.Enabled = !r.Closed && r.AuthorPid > 0;
+            encerrar.Click += delegate
+            {
+                WindowRow alvo = r;
+                try { BeginInvoke(new Action(delegate { AskCloseWindow(alvo); })); }
+                catch { AskCloseWindow(alvo); }
+            };
+            _ctxMenu.Items.Add(encerrar);
+            try { _ctxMenu.Show(screenPoint); } catch { }
+        }
+
+        /// <summary>
+        /// Confirma e encerra o autor da janela (e os processos que ele deixou
+        /// rodando), com a mesma checagem de hora de inicio das sessoes.
+        /// </summary>
+        private void AskCloseWindow(WindowRow r)
+        {
+            string nome = r.AuthorName.Length > 0 ? r.AuthorName : ("PID " + r.AuthorPid);
+            string msg = Lang.F("confirmCloseWinMsg", nome, r.AuthorPid);
+            string baixo = r.AuthorName.ToLowerInvariant();
+            if (baixo == "explorer.exe" || baixo == "winlogon.exe" || baixo == "csrss.exe"
+                || baixo == "services.exe" || baixo == "lsass.exe" || baixo == "dwm.exe"
+                || baixo == "system" || baixo == "smss.exe")
+                msg += Environment.NewLine + Environment.NewLine + Lang.T("confirmCloseWinCritical");
+            bool ok = NeonDialog.Confirm(this, Lang.T("confirmCloseWinTitle"), msg,
+                Lang.T("confirmYes"), Lang.T("confirmNo"), Theme.Red);
+            if (!ok) return;
+            TerminateResult res = ProcessControl.Terminate(r.AuthorPid, true, r.AuthorStartedAt);
+            if (res.Ok)
+            {
+                r.Closed = true;
+                r.ClosedAt = DateTime.Now;
+                _windows.Invalidate();
+                ShowNotice(Lang.F("noticeWinClosed", nome), Theme.Green, 6);
+            }
+            else if (res.AlreadyGone)
+            {
+                ShowNotice(Lang.F("noticeCloseGone", nome), Theme.Amber, 6);
+            }
+            else
+            {
+                ShowNotice(Lang.F("noticeCloseFail", nome, res.Error), Theme.Red, 10);
+            }
+        }
+
         /// <summary>Mensagem temporaria no rodape do painel.</summary>
         private void ShowNotice(string text, Color color, int seconds)
         {
@@ -974,9 +1031,11 @@ namespace CmdWatch.Gui
                 }
                 r.Title = rec.Title;
                 r.AuthorName = rec.AuthorName;
+                r.AuthorPid = rec.AuthorPid;
+                r.AuthorStartedAt = rec.AuthorStartedAt;
                 r.Origin = "";
-                if (rec.Chain.Count > 0 && rec.Chain[0] != null && rec.Chain[0].Name.Length > 0)
-                    r.Origin = rec.Chain[0].Name + " (" + rec.Chain[0].Pid + ")";
+                if (rec.Chain.Count > 0)
+                    r.Origin = string.Join(" <= ", rec.Chain.Where(p => p != null && p.Name.Length > 0).Select(p => p.Name + " (" + p.Pid + ")"));
                 r.Author = (rec.AuthorName.Length > 0 ? rec.AuthorName : "?") + " (" + rec.AuthorPid + ")";
                 if (rec.Chain.Count > 0)
                 {
@@ -984,6 +1043,10 @@ namespace CmdWatch.Gui
                     if (pai != null && pai.Name.Length > 0)
                         r.Author = r.Author + " <= " + pai.Name + "(" + pai.Pid + ")";
                 }
+                r.OriginTip = r.Origin;
+                // Dados conhecidos, sem tentar resolver novamente o PID (pode ter sido reutilizado).
+                foreach (ProcInfo p in rec.Chain.Where(p => p != null && p.CmdLine.Length > 0))
+                    r.OriginTip += Environment.NewLine + p.Name + " (" + p.Pid + "): " + Mascara.Aplicar(p.CmdLine);
                 r.CmdLine = Mascara.Aplicar(rec.AuthorCmdLine);
                 if (rec.Chain.Count > 0 && rec.Chain[0] != null && rec.Chain[0].CmdLine.Length > 0
                     && (r.CmdLine == null || r.CmdLine.Length == 0))
@@ -1177,7 +1240,7 @@ namespace CmdWatch.Gui
                 {
                     WindowRow r;
                     if (!_winByHwnd.TryGetValue(h, out r)) continue;
-                    if (q.Length > 0 && !Contem(r.Title, q) && !Contem(r.Author, q) && !Contem(r.CmdLine, q)) continue;
+                    if (q.Length > 0 && !Contem(r.Title, q) && !Contem(r.Author, q) && !Contem(r.Origin, q) && !Contem(r.OriginTip, q) && !Contem(r.CmdLine, q)) continue;
                     winRows.Add(r);
                 }
                 _windows.Rows = _windows.Ordenar(winRows);

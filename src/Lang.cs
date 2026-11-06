@@ -135,6 +135,15 @@ namespace CmdWatch
             // -------------------------------------------- menu de contexto
             { "search",        new[] { "Buscar", "Search" } },
             { "menuClose",     new[] { "Fechar", "Close" } },
+            { "menuCloseWin",  new[] { "Encerrar", "Terminate" } },
+            { "confirmCloseWinTitle", new[] { "Encerrar o processo?", "Terminate the process?" } },
+            { "confirmCloseWinMsg", new[] {
+                "O processo {0} (PID {1}) e os processos que ele deixou rodando ser\u00e3o encerrados.\nO cmdwatch continua monitorando.",
+                "Process {0} (PID {1}) and the processes it left running will be terminated.\ncmdwatch keeps monitoring." } },
+            { "confirmCloseWinCritical", new[] {
+                "Aten\u00e7\u00e3o: este \u00e9 um processo do sistema. Encerrar pode deixar o Windows inst\u00e1vel.",
+                "Warning: this is a system process. Terminating it may make Windows unstable." } },
+            { "noticeWinClosed", new[] { "Processo encerrado: {0}", "Process terminated: {0}" } },
             { "confirmCloseTitle", new[] { "Encerrar o script?", "Terminate the script?" } },
             { "confirmCloseMsg",   new[] { "O script {0} (PID {1}) e os processos que ele deixou rodando serão encerrados.\nO cmdwatch continua monitorando.",
                                            "The script {0} (PID {1}) and the processes it left running will be terminated.\ncmdwatch keeps monitoring." } },
