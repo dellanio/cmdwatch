@@ -1180,7 +1180,7 @@ namespace CmdWatch.Gui
                     if (q.Length > 0 && !Contem(r.Title, q) && !Contem(r.Author, q) && !Contem(r.CmdLine, q)) continue;
                     winRows.Add(r);
                 }
-                _windows.Rows = winRows.OrderByDescending(r => r.StartedAt).ToList();
+                _windows.Rows = _windows.Ordenar(winRows);
                 _windows.Invalidate();
                 _pWindows.TitleValue = _windows.Rows.Count.ToString();
                 _pWindows.Invalidate();

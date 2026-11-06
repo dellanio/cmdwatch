@@ -1022,13 +1022,90 @@ namespace CmdWatch.Gui
         protected override int Count { get { return Rows.Count; } }
 
         private static readonly int[] Larg = { 150, 300, 200, 90, 110 };
+        /// <summary>Coluna ativa do sort do usuario; -1 = padrao (StartedAt decrescente).</summary>
+        private int _sortCol = -1;
+        private bool _sortAsc = true;
+
+        /// <summary>Aplica o sort atual (ou StartedAt desc se o usuario ainda nao clicou).</summary>
+        public List<WindowRow> Ordenar(IEnumerable<WindowRow> src)
+        {
+            List<WindowRow> list = new List<WindowRow>(src);
+            list.Sort(Comparar);
+            return list;
+        }
+
+        private int Comparar(WindowRow a, WindowRow b)
+        {
+            int c;
+            if (_sortCol < 0)
+                c = b.StartedAt.CompareTo(a.StartedAt);
+            else
+            {
+                switch (_sortCol)
+                {
+                    case 0: c = string.Compare(a.AuthorName, b.AuthorName, StringComparison.CurrentCultureIgnoreCase); break;
+                    case 1: c = string.Compare(a.Title, b.Title, StringComparison.CurrentCultureIgnoreCase); break;
+                    case 2: c = string.Compare(a.Origin, b.Origin, StringComparison.CurrentCultureIgnoreCase); break;
+                    case 3: c = a.DuracaoSeg.CompareTo(b.DuracaoSeg); break;
+                    case 4: c = StatusKey(a).CompareTo(StatusKey(b)); break;
+                    default: c = 0; break;
+                }
+                if (!_sortAsc) c = -c;
+            }
+            if (c != 0) return c;
+            return b.StartedAt.CompareTo(a.StartedAt);
+        }
+
+        private static int StatusKey(WindowRow r)
+        {
+            if (r.Closed) return 2;
+            if (!r.Visible) return 1;
+            return 0;
+        }
+
+        private int ColunaEm(int x)
+        {
+            int[] xs = Xs(Larg, 1, 30);
+            for (int i = 0; i < Larg.Length; i++)
+                if (x >= xs[i] && x < xs[i + 1]) return i;
+            return -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Cursor = e.Y < HeaderH ? Cursors.Hand : Cursors.Default;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            Cursor = Cursors.Default;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left || e.Y >= HeaderH) return;
+            int col = ColunaEm(e.X);
+            if (col < 0) return;
+            if (_sortCol == col) _sortAsc = !_sortAsc;
+            else { _sortCol = col; _sortAsc = true; }
+            Rows = Ordenar(Rows);
+            Invalidate();
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
             int[] xs = Xs(Larg, 1, 30);
-            Cabecalho(g, new[] { Lang.T("v2ColProc"), Lang.T("v2ColPath"), Lang.T("v2ColOrigin"),
-                Lang.T("v2ColDur"), Lang.T("v2ColStatus") }, xs);
+            string[] titulos = {
+                Lang.T("v2ColProc"), Lang.T("v2ColPath"), Lang.T("v2ColOrigin"),
+                Lang.T("v2ColDur"), Lang.T("v2ColStatus")
+            };
+            if (_sortCol >= 0 && _sortCol < titulos.Length)
+                titulos[_sortCol] = titulos[_sortCol] + (_sortAsc ? " \u25b2" : " \u25bc");
+            Cabecalho(g, titulos, xs);
             if (Rows.Count == 0) { Vazio(g, Lang.T("v2NoWindows")); return; }
 
             for (int i = 0; i < Visiveis && _scroll + i < Rows.Count; i++)
