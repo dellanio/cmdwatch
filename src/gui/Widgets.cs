@@ -94,6 +94,23 @@ namespace CmdWatch.Gui
         public Color Accent = Theme.Teal;
         public int HeaderHeight = 40;
 
+        /// <summary>
+        /// Abas do cabecalho. Quando existe, o cabecalho deixa de mostrar o
+        /// titulo solto e vira uma fileira de abas (a primeira e o proprio
+        /// titulo do cartao). Null = cabecalho simples, como era.
+        /// </summary>
+        public string[] Tabs;
+        /// <summary>Contador (selo) de cada aba.</summary>
+        public string[] TabValues;
+        /// <summary>Glifo (icone) de cada aba.</summary>
+        public string[] TabGlyphs;
+        /// <summary>Aba ativa (indice em Tabs).</summary>
+        public int AbaAtiva;
+        /// <summary>Dispara quando o usuario troca de aba.</summary>
+        public event Action<int> TabChanged;
+
+        private Rectangle[] _tabHit = new Rectangle[0];
+
         public NeonPanel()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -114,6 +131,8 @@ namespace CmdWatch.Gui
             if (fundo != null) g.DrawImage(fundo, 0, 0);
 
             const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+            if (Tabs != null && Tabs.Length > 0) { DesenharAbas(g, L); return; }
+
             Rectangle head = new Rectangle(14, 0, Math.Max(10, Width - 28), HeaderHeight);
             TextRenderer.DrawText(g, Title, Theme.UiTitle, head, Theme.Text, L);
             if (TitleValue.Length > 0)
@@ -125,6 +144,73 @@ namespace CmdWatch.Gui
                 TextRenderer.DrawText(g, TitleValue, Theme.UiSmall, selo, Theme.Text,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
+        }
+
+        /// <summary>
+        /// Fileira de abas: a ativa em verde-agua com a linha de baixo na
+        /// mesma cor; as outras, em cinza. Cada aba leva icone, nome e o
+        /// contador (selo).
+        /// </summary>
+        private void DesenharAbas(Graphics g, TextFormatFlags L)
+        {
+            _tabHit = new Rectangle[Tabs.Length];
+            int x = 14;
+            for (int i = 0; i < Tabs.Length; i++)
+            {
+                int ini = x;
+                bool ativa = i == AbaAtiva;
+                Color cor = ativa ? Theme.Teal : Theme.Dim;
+
+                if (TabGlyphs != null && i < TabGlyphs.Length && TabGlyphs[i].Length > 0)
+                {
+                    Theme.DrawIcon(g, TabGlyphs[i], new Rectangle(x, (HeaderHeight - 16) / 2, 16, 16), cor, Theme.IconFont);
+                    x += 22;
+                }
+                int tw = TextRenderer.MeasureText(g, Tabs[i], Theme.UiTitle, Size.Empty, L).Width;
+                TextRenderer.DrawText(g, Tabs[i], Theme.UiTitle, new Rectangle(x, 0, tw + 4, HeaderHeight), cor, L);
+                x += tw + 9;
+
+                if (TabValues != null && i < TabValues.Length && TabValues[i].Length > 0)
+                {
+                    int vw = TextRenderer.MeasureText(g, TabValues[i], Theme.UiSmall, Size.Empty, L).Width + 12;
+                    Rectangle selo = new Rectangle(x, HeaderHeight / 2 - 9, Math.Max(20, vw), 18);
+                    Theme.DrawPanel(g, selo, 4, Theme.Fill, Theme.Border);
+                    TextRenderer.DrawText(g, TabValues[i], Theme.UiSmall, selo, ativa ? Theme.Teal : Theme.Text,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    x += vw + 14;
+                }
+                else x += 10;
+
+                _tabHit[i] = new Rectangle(ini, 0, x - ini, HeaderHeight);
+                if (ativa)
+                    using (Pen p = new Pen(Theme.Teal, 2))
+                        g.DrawLine(p, ini, HeaderHeight - 2, x - 4, HeaderHeight - 2);
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (Tabs == null || Tabs.Length == 0) return;
+            for (int i = 0; i < _tabHit.Length; i++)
+            {
+                if (_tabHit[i].Width > 0 && _tabHit[i].Contains(e.Location))
+                {
+                    SelecionarAba(i);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>Troca de aba pelo codigo (tambem usado pela automacao de UI).</summary>
+        public void SelecionarAba(int i)
+        {
+            if (Tabs == null || i < 0 || i >= Tabs.Length) return;
+            if (AbaAtiva == i) return;
+            AbaAtiva = i;
+            Invalidate();
+            if (TabChanged != null) TabChanged(i);
         }
 
         private Bitmap _fundo;

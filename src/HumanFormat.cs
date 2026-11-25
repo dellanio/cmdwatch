@@ -42,6 +42,28 @@ namespace CmdWatch
     internal static class HumanFormat
     {
         /// <summary>
+        /// Memoria em texto ("512 MB", "1,4 GB"). Usado na aba de CPU do
+        /// painel e no detalhe do processo.
+        /// </summary>
+        public static string Memoria(long bytes)
+        {
+            if (bytes <= 0) return "0 KB";
+            if (bytes < 1024 * 1024) return (bytes / 1024.0).ToString("0") + " KB";
+            double mb = bytes / 1048576.0;
+            if (mb < 1024) return mb.ToString("0") + " MB";
+            return (mb / 1024.0).ToString("0.0").Replace('.', ',') + " GB";
+        }
+
+        /// <summary>Duracao em texto ("3s", "12min", "2h 05min").</summary>
+        public static string Duracao(TimeSpan d)
+        {
+            if (d.TotalSeconds < 0) d = TimeSpan.Zero;
+            if (d.TotalSeconds < 60) return ((int)d.TotalSeconds) + "s";
+            if (d.TotalMinutes < 60) return ((int)d.TotalMinutes) + "min";
+            return ((int)d.TotalHours) + "h " + d.Minutes.ToString("00") + "min";
+        }
+
+        /// <summary>
         /// Linha de campo do bloco de sessao ("script : ...", "chamador: ...").
         /// O separador acompanha o tamanho do rotulo para manter a coluna dos
         /// dois-pontos alinhada.

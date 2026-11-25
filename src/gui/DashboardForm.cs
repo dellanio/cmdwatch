@@ -49,6 +49,14 @@ namespace CmdWatch.Gui
         private NeonFlow _stream;
         private LineChart _activity;
         private WindowTable _windows;
+        private CpuView _cpu;
+        private CpuSampler _cpuSampler;
+        private bool _abaCpu;
+        private double _cpuTotal;
+        // usuario e integridade por processo: a leitura e cara (abre o token
+        // do processo), entao cada processo e consultado uma vez so. A chave
+        // leva a hora de inicio: o Windows recicla o PID e o dono muda.
+        private readonly Dictionary<int, CpuUser> _cpuUsuarios = new Dictionary<int, CpuUser>();
         private NeonCheckBox _checkTray;
         private StatStrip _stats;
         private SideBar _side;
@@ -109,6 +117,11 @@ namespace CmdWatch.Gui
             _slow.Interval = 1000;
             _slow.Tick += OnSlowTick;
             _slow.Start();
+
+            // amostrador de CPU: uma thread propria que tira o retrato do
+            // kernel de 1 em 1,5 s e publica o resultado (o painel so le)
+            _cpuSampler = new CpuSampler(1500);
+            _cpuSampler.Iniciar();
         }
 
         // ------------------------------------------------------------ UI
@@ -133,6 +146,16 @@ namespace CmdWatch.Gui
             _sessions.SelectionChanged += OnSelectionChanged;
             _sessions.ContextRequested += OnSessionContext;
             _pSessions.Controls.Add(_sessions);
+
+            // aba "Processos CPU" dentro do cartao de sessoes: lista de
+            // processos (esquerda) e detalhe (direita)
+            _cpu = new CpuView();
+            _cpu.Name = _cpu.Text = "cpuProcessos";
+            _cpu.Visible = false;
+            _pSessions.Controls.Add(_cpu);
+            _pSessions.Tabs = new[] { Lang.T("v2Sessions"), Lang.T("v2CpuTab") };
+            _pSessions.TabGlyphs = new[] { "\uE7F4", "\uE950" };
+            _pSessions.TabChanged += OnTabChanged;
 
             _stream = new NeonFlow();
             _pStream.Controls.Add(_stream);
@@ -221,12 +244,16 @@ namespace CmdWatch.Gui
         {
             Text = Lang.T("v2Title");
             _pSessions.Title = Lang.T("v2Sessions");
+            _pSessions.Tabs = new[] { Lang.T("v2Sessions"), Lang.T("v2CpuTab") };
+            _pSessions.TabGlyphs = new[] { "\uE7F4", "\uE950" };
             _pWindows.Title = Lang.T("v2Windows");
             _pStream.Title = Lang.T("v2Flow");
             _pActivity.Title = Lang.T("v2Activity");
             _activity.LabelA = Lang.T("v2LegCmd");
             _activity.LabelB = Lang.T("v2LegSess");
-            _stats.Labels = new[] { Lang.T("v2StatSess"), Lang.T("v2StatWin"), Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
+            _stats.Labels = new[] { Lang.T("v2StatSess"), Lang.T("v2StatWin"), Lang.T("v2StatCpu"),
+                Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
+            _stats.Glyphs = new[] { "\uE756", "\uE737", "\uE950", "\uE81E", "\uE823" };
             _busca.Cue = Lang.T("v2Search");
             _buscaFluxo.Cue = Lang.T("v2FlowSearch");
             _btnPausa.Glyph = _paused ? "\uE768" : "\uE769";
@@ -306,7 +333,9 @@ namespace CmdWatch.Gui
                 fechado.SetBounds(x0, y, cw, cab);
                 aberto.SetBounds(x0, y + cab + Gap, cw, midH);
             }
-            _sessions.Visible = !cS; _windows.Visible = !cW; _stream.Visible = !cF; _activity.Visible = !cA;
+            _sessions.Visible = !cS && !_abaCpu;
+            _cpu.Visible = !cS && _abaCpu;
+            _windows.Visible = !cW; _stream.Visible = !cF; _activity.Visible = !cA;
 
             // controles dos cabecalhos dos cartoes (alinhados a direita; a seta fica no canto)
             int hb = 26, hy = (_pSessions.HeaderHeight - hb) / 2;
@@ -315,6 +344,7 @@ namespace CmdWatch.Gui
             int dir = 12 + hb + 8;
             int fw = Math.Max(140, _btnFiltro.PreferredW());
             _btnFiltro.SetBounds(_pSessions.Width - dir - fw, hy, fw, hb);
+            _btnFiltro.Visible = !_abaCpu;          // o filtro e das sessoes
             int lsw = _btnLimparSess.PreferredW() + 4;
             _btnLimparSess.SetBounds(_btnFiltro.Left - 8 - lsw, hy, lsw, hb);
             int fx = _pStream.Width - dir;
@@ -330,6 +360,7 @@ namespace CmdWatch.Gui
 
             foreach (var par in new KeyValuePair<NeonPanel, Control>[] {
                 new KeyValuePair<NeonPanel, Control>(_pSessions, _sessions),
+                new KeyValuePair<NeonPanel, Control>(_pSessions, _cpu),
                 new KeyValuePair<NeonPanel, Control>(_pWindows, _windows) })
             {
                 Rectangle a = par.Key.PlotArea;
@@ -444,6 +475,18 @@ namespace CmdWatch.Gui
             OnSlowTick(null, EventArgs.Empty);
         }
 
+        /// <summary>
+        /// Troca de aba no cartao de sessoes: "Sessoes CMD" ou
+        /// "Processos CPU". A busca da barra superior passa a filtrar a lista
+        /// da aba ativa.
+        /// </summary>
+        private void OnTabChanged(int indice)
+        {
+            _abaCpu = indice == 1;
+            LayoutDashboard();
+            OnSlowTick(null, EventArgs.Empty);
+        }
+
         private void AbrirMenu(Control ancora, IEnumerable<KeyValuePair<string, Action>> itens, string marcado)
         {
             _dropMenu.Items.Clear();
@@ -533,6 +576,14 @@ namespace CmdWatch.Gui
         /// </summary>
         private void LimparSessoes()
         {
+            // na aba de CPU o mesmo botao limpa a selecao do processo
+            if (_abaCpu)
+            {
+                _cpu.Tabela.Selecionar(-1);
+                _cpu.Detalhe.Selecionar(null, null);
+                OnSlowTick(null, EventArgs.Empty);
+                return;
+            }
             foreach (SessionRow r in _rows) _limpas[r.Pid] = r.CmdStartedAt;
             _rows.Clear();
             _rowByPid.Clear();
@@ -672,6 +723,7 @@ namespace CmdWatch.Gui
         {
             try { if (_tick != null) _tick.Stop(); } catch { }
             try { if (_slow != null) _slow.Stop(); } catch { }
+            try { if (_cpuSampler != null) { _cpuSampler.Parar(); _cpuSampler = null; } } catch { }
             try { if (_engine != null) { _engine.Stop(); _engine.Dispose(); } } catch { }
             try { if (_janelas != null) { _janelas.OnChanged = null; _janelas.Stop(); } } catch { }
             try { if (_log != null) { _log.Flush(); _log.Close(); _log = null; } } catch { }
@@ -802,7 +854,7 @@ namespace CmdWatch.Gui
             ApplyTrayTexts();
             // o menu de contexto fica com o rotulo antigo: fecha
             try { if (_ctxMenu.Visible) _ctxMenu.Close(); } catch { }
-            foreach (Control c in new Control[] { _pSessions, _pStream, _pActivity, _pWindows, _sessions, _windows, _activity, _stats, _checkTray })
+            foreach (Control c in new Control[] { _pSessions, _pStream, _pActivity, _pWindows, _sessions, _windows, _activity, _stats, _checkTray, _cpu, _cpu.Tabela, _cpu.Detalhe })
                 c.Invalidate();
             Invalidate();
         }
@@ -1248,18 +1300,96 @@ namespace CmdWatch.Gui
                 _pWindows.TitleValue = _windows.Rows.Count.ToString();
                 _pWindows.Invalidate();
 
+                // aba "Processos CPU": o retrato mais recente do amostrador
+                CpuSnapshot snap = CpuFeed.Atual;
+                int totalProcessos = 0;
+                if (snap != null && snap.Processos.Count > 0)
+                {
+                    totalProcessos = snap.Processos.Count;
+                    _cpuTotal = snap.UsoTotal;
+                    _cpu.Tabela.Filtrar(snap.Processos, q);
+
+                    // sem escolha, o topo da lista fica selecionado (o processo
+                    // que mais esta usando a CPU)
+                    if (_cpu.Tabela.SelecionadoPid < 0 && _cpu.Tabela.Rows.Count > 0)
+                        _cpu.Tabela.Selecionar(_cpu.Tabela.Rows[0].Pid);
+
+                    // detalhe do processo escolhido: usuario e integridade
+                    // sao lidos sob demanda (uma consulta por processo)
+                    CpuRow sel = null;
+                    foreach (CpuRow r in snap.Processos)
+                        if (r.Pid == _cpu.Tabela.SelecionadoPid) { sel = CopiaCpu(r); break; }
+                    if (sel != null)
+                    {
+                        // usuario e integridade: lidos uma vez por processo
+                        // (o token nao muda enquanto o processo viver)
+                        CpuUser dono;
+                        if (!_cpuUsuarios.TryGetValue(sel.Pid, out dono) || dono.Inicio != sel.StartedAt)
+                        {
+                            string usr;
+                            bool elev;
+                            if (NativeProcess.TryGetUserAndIntegrity(sel.Pid, out usr, out elev))
+                            {
+                                dono = new CpuUser();
+                                dono.Inicio = sel.StartedAt;
+                                dono.User = usr;
+                                dono.Elevado = elev;
+                                _cpuUsuarios[sel.Pid] = dono;
+                                if (_cpuUsuarios.Count > 2000) _cpuUsuarios.Clear();
+                            }
+                            else dono = null;   // falhou: tenta de novo no proximo tique
+                        }
+                        if (dono != null) { sel.User = dono.User; sel.Elevado = dono.Elevado; }
+                        _cpu.Detalhe.Selecionar(sel, snap.Processos);
+                    }
+                    else _cpu.Detalhe.Selecionar(null, snap.Processos);
+                }
+                _pSessions.TabValues = new[] { _sessions.Rows.Count.ToString(), totalProcessos.ToString() };
+                _pSessions.Invalidate();
+
                 // estatisticas: valores reais do motor
                 int ativas = 0;
                 foreach (SessionRow r in _rows) if (!r.Closed) ativas++;
                 TimeSpan t = DateTime.Now - _inicio;
                 _stats.Values = new[]
                 {
-                    ativas.ToString(), _totalWindows.ToString(), _totalSteps.ToString(),
+                    ativas.ToString(), _totalWindows.ToString(), _cpuTotal.ToString("0.0") + "%",
+                    _totalSteps.ToString(),
                     ((int)t.TotalHours).ToString("00") + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00")
                 };
                 _stats.Invalidate();
             }
             catch { }
+        }
+
+        /// <summary>Copia da linha do retrato (o detalhe preenche usuario e integridade).</summary>
+        private static CpuRow CopiaCpu(CpuRow r)        {
+            CpuRow c = new CpuRow();
+            c.Pid = r.Pid;
+            c.ParentPid = r.ParentPid;
+            c.Name = r.Name;
+            c.CmdLine = r.CmdLine;
+            c.Path = r.Path;
+            c.Cpu = r.Cpu;
+            c.CpuMedia = r.CpuMedia;
+            c.MemBytes = r.MemBytes;
+            c.Threads = r.Threads;
+            c.StartedAt = r.StartedAt;
+            c.SessionId = r.SessionId;
+            c.User = r.User;
+            c.Elevado = r.Elevado;
+            return c;
+        }
+
+        /// <summary>
+        /// Dono de um processo (usuario e integridade), guardado por PID + hora
+        /// de inicio - o PID sozinho nao serve: o Windows o recicla.
+        /// </summary>
+        private sealed class CpuUser
+        {
+            public string User = "";
+            public bool Elevado;
+            public DateTime Inicio = DateTime.MinValue;
         }
     }
 }

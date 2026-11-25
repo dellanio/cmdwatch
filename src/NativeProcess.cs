@@ -213,6 +213,14 @@ namespace CmdWatch
                 int offPid = quatroBytes ? 0x50 : 0x58;
                 int offPpid = quatroBytes ? 0x58 : 0x60;
                 int offSession = quatroBytes ? 0x64 : 0x6C;
+                // tempos de CPU e memoria: no layout moderno UserTime fica em
+                // 0x28 e KernelTime em 0x30; no legado tudo soma 8 a partir
+                // de CreateTime. A memoria (working set) fica em 0x08 no
+                // moderno (8 bytes) e em 0x0C no legado (4 bytes).
+                int offCpuUser = quatroBytes ? 0x28 : 0x30;
+                int offCpuKernel = quatroBytes ? 0x30 : 0x38;
+                int offThreads = quatroBytes ? 0x04 : 0x08;
+                bool legado = !quatroBytes;
 
                 long offset = 0;
                 while (true)
@@ -252,6 +260,21 @@ namespace CmdWatch
                         // CreateTime: o instante real em que o processo nasceu
                         long ft = ReadLong(buf, offset + offCreate);
                         if (ft > 0) pi.StartedAt = DateTime.FromFileTimeUtc(ft).ToLocalTime();
+
+                        // tempo de CPU acumulado (kernel + usuario) e memoria:
+                        // os dois campos ja vem no buffer do kernel, entao
+                        // custa zero (e sao justos o bastante para o painel:
+                        // o retrato do kernel nao tem working set "bruto", so
+                        // o working set privado).
+                        long cpuUser = ReadLong(buf, offset + offCpuUser);
+                        long cpuKernel = ReadLong(buf, offset + offCpuKernel);
+                        if (cpuUser > 0) pi.CpuTime += cpuUser;
+                        if (cpuKernel > 0) pi.CpuTime += cpuKernel;
+                        pi.MemBytes = legado
+                            ? (uint)Marshal.ReadInt32(buf, (int)(offset + 0x0C))
+                            : ReadLong(buf, offset + 0x08);
+                        if (pi.MemBytes < 0) pi.MemBytes = 0;
+                        pi.Threads = (int)Marshal.ReadInt32(buf, (int)(offset + offThreads));
 
                         list.Add(pi);
                     }
@@ -663,6 +686,133 @@ namespace CmdWatch
             if (!ReadProcessMemory(h, address, buf, buf.Length, out read)) return false;
             value = Is64Bit ? new IntPtr(BitConverter.ToInt64(buf, 0)) : new IntPtr(BitConverter.ToInt32(buf, 0));
             return true;
+        }
+
+        // -------------------------------------------------------------
+        // Usuario e integridade do processo (o token)
+        //
+        // O retrato do kernel NAO traz o dono do processo: isso sai do
+        // token. A consulta e por processo (OpenProcess + token), entao
+        // fica sob demanda - nunca no retrato, que roda a cada 500 ms.
+        // -------------------------------------------------------------
+
+        private const uint TOKEN_QUERY = 0x0008;
+        private const int TOKEN_USER = 1;
+        private const int TOKEN_MANDATORY_LABEL = 25;
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenProcessToken(IntPtr hProcess, uint desiredAccess, out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int len, out int retLen);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr stringSid);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr hMem);
+
+        /// <summary>
+        /// Usuario (conta) e nivel de integridade de um processo. Devolve
+        /// false quando o token nao pode ser lido (processo protegido ou
+        /// sem permissao).
+        /// </summary>
+        public static bool TryGetUserAndIntegrity(int pid, out string user, out bool elevado)
+        {
+            user = "";
+            elevado = false;
+            IntPtr h = IntPtr.Zero;
+            IntPtr token = IntPtr.Zero;
+            try
+            {
+                h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (h == IntPtr.Zero) return false;
+                if (!OpenProcessToken(h, TOKEN_QUERY, out token) || token == IntPtr.Zero) return false;
+
+                // integridade: o SID de integridade (S-1-16-<RID>) tem o RID
+                // no fim: 0x1000 baixa, 0x2000 media, 0x3000 alta, 0x4000
+                // sistema. ConvertSidToStringSid e a via segura de ler isso.
+                int len;
+                GetTokenInformation(token, TOKEN_MANDATORY_LABEL, IntPtr.Zero, 0, out len);
+                if (len > 0)
+                {
+                    IntPtr buf = Marshal.AllocHGlobal(len);
+                    try
+                    {
+                        if (GetTokenInformation(token, TOKEN_MANDATORY_LABEL, buf, len, out len))
+                        {
+                            IntPtr sid = Marshal.ReadIntPtr(buf);          // TOKEN_MANDATORY_LABEL: PSID
+                            IntPtr strSid;
+                            if (sid != IntPtr.Zero && ConvertSidToStringSid(sid, out strSid) && strSid != IntPtr.Zero)
+                            {
+                                try
+                                {
+                                    string s = Marshal.PtrToStringUni(strSid);
+                                    if (!string.IsNullOrEmpty(s))
+                                    {
+                                        int pos = s.LastIndexOf('-');
+                                        uint rid;
+                                        if (pos >= 0 && uint.TryParse(s.Substring(pos + 1), out rid))
+                                            elevado = rid >= 0x3000;
+                                    }
+                                }
+                                finally { try { LocalFree(strSid); } catch { } }
+                            }
+                        }
+                    }
+                    finally { try { Marshal.FreeHGlobal(buf); } catch { } }
+                }
+
+                // conta: TOKEN_USER -> o SID do dono. O nome amigavel vem
+                // do SecurityIdentifier gerenciado (o LookupAccountSid direto
+                // corrompe memoria neste cenario e, em .NET 4, uma violacao de
+                // acesso nao e capturavel - o processo inteiro cairia).
+                GetTokenInformation(token, TOKEN_USER, IntPtr.Zero, 0, out len);
+                if (len > 0)
+                {
+                    IntPtr buf = Marshal.AllocHGlobal(len);
+                    try
+                    {
+                        if (GetTokenInformation(token, TOKEN_USER, buf, len, out len))
+                        {
+                            IntPtr sid = Marshal.ReadIntPtr(buf);
+                            if (sid != IntPtr.Zero)
+                            {
+                                IntPtr strSid;
+                                if (ConvertSidToStringSid(sid, out strSid) && strSid != IntPtr.Zero)
+                                {
+                                    try
+                                    {
+                                        string s = Marshal.PtrToStringUni(strSid);
+                                        if (!string.IsNullOrEmpty(s))
+                                        {
+                                            try
+                                            {
+                                                object conta = new System.Security.Principal.SecurityIdentifier(s)
+                                                    .Translate(typeof(System.Security.Principal.NTAccount));
+                                                user = conta != null ? conta.ToString() : s;
+                                            }
+                                            catch { user = s; }
+                                        }
+                                    }
+                                    finally { try { LocalFree(strSid); } catch { } }
+                                }
+                            }
+                        }
+                    }
+                    finally { try { Marshal.FreeHGlobal(buf); } catch { } }
+                }
+                return user.Length > 0;
+            }
+            catch { return false; }
+            finally
+            {
+                try { if (token != IntPtr.Zero) CloseHandle(token); } catch { }
+                try { if (h != IntPtr.Zero) CloseHandle(h); } catch { }
+            }
         }
     }
 }

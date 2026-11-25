@@ -23,6 +23,12 @@ namespace CmdWatch
         public DateTime StartedAt = DateTime.MinValue;
         public uint SessionId;
         public string User = "";
+        /// <summary>Tempo de CPU acumulado (kernel + usuario), em unidades de 100 ns.</summary>
+        public long CpuTime;
+        /// <summary>Memoria do processo (working set privado), em bytes.</summary>
+        public long MemBytes;
+        /// <summary>Numero de threads do processo.</summary>
+        public int Threads;
         public bool HasCmdLine => !string.IsNullOrEmpty(CmdLine);
         /// <summary>True quando a linha de comando ja foi lida (evita reler).</summary>
         public bool Hydrated;
