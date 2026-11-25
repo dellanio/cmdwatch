@@ -192,6 +192,25 @@ cmdwatch.exe trace script.cmd
 
 ---
 
+## 🐛 Correções da v1.1.1 (teste de campo da v1.1.0)
+
+Quatro defeitos achados no teste de campo, todos medidos antes de corrigir:
+
+| Defeito | Causa medida | Correção |
+|---|---|---|
+| **Processo elevado sumia do log** | a chamada à consulta limitada usava um nome de função inexistente no `ntdll.dll`; o erro era engolido por um `catch` e a leitura caía no PEB — que processo elevado bloqueia | `EntryPoint` correto: a consulta passa a ler a linha de comando de processo elevado (medido: **6 de 6** processos de integridade alta; e a tarefa `Higiene-Remocao`, que roda como administrador, foi capturada ao vivo com a linha de comando do processo elevado) |
+| **A janela mostrava o programa, não quem o chamou** | o autor era escolhido como o cliente de console **mais recente** (o `git.exe` transitório) | o autor passa a ser o **ancestral mais próximo dentro do console, sem contar a raiz**: num console `cmd.exe → python.exe → git.exe`, o autor é o `python.exe` (quem chamou), e o `git.exe` fica registrado como o *programa* em execução (campo `program`) |
+| **Janela escondida virava "fechada"** | para certas janelas de outro processo a consulta cross-process **não responde** (classe vazia, handle fora da enumeração) — **enquanto o dono da janela a vê normalmente**; o cmdwatch concluía "morreu" | o evento de destruição não fecha mais nada (só marca); a varredura fecha só depois de **duas varreduras seguidas** de ausência e, enquanto o **processo dono** existir, espera 30 s. Medido: esconder → `window_hide` com `closed=false`, e a janela **não** volta como janela nova |
+| **`sessionId` saindo como 59133952** | o campo era lido no offset errado (`0x68` = `UniqueProcessKey`) | corrigido para `0x64`, medido nos 859 registros da máquina |
+
+**Limitação honesta:** no caso em que a janela não responde à consulta cross-process, o cmdwatch
+**não consegue reenxergê-la** — ela continua registrada como *oculta*, em vez de voltar a
+"visível". E um `.cmd` **sem janela nenhuma** (`CreateNoWindow`) que vive ~90 ms continua
+dependendo do intervalo do motor (no regime lento de 500 ms: 0/6 a 2/8; com `--interval 50`:
+4/6 a 8/8).
+
+---
+
 ## 🔒 Modelo de Segurança & Privacidade
 
 - **Apenas Leitura do Sistema:** O cmdwatch não injeta DLLs, não instala drivers de kernel e não bloqueia a execução do Windows.

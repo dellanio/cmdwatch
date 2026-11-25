@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.1.0";
+        internal const string Version = "1.1.1";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]

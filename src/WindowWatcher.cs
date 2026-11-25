@@ -34,6 +34,8 @@ namespace CmdWatch
         public DateTime LastSeen;
         public DateTime? HiddenAt;
         public DateTime? ClosedAt;
+        /// <summary>Momento em que chegou o evento de destruicao (ainda nao confirmado).</summary>
+        public DateTime? PendingCloseAt;
         public bool Visible = true;
         public int FocusCount;
         public DateTime? LastFocusAt;
@@ -915,6 +917,28 @@ namespace CmdWatch
             catch { }
         }
 
+        /// <summary>
+        /// A janela ainda existe? A consulta de classe pode responder vazia para
+        /// uma janela VIVA (medido: form WinForms criado com a janela ja oculta
+        /// - o handle e recriado e a classe volta vazia enquanto a janela segue
+        /// de pe). A enumeracao das janelas de topo nao mente: uma janela viva
+        /// esta na lista.
+        /// </summary>
+        private bool AindaExiste(IntPtr hwnd)
+        {
+            try
+            {
+                bool achou = false;
+                EnumWindows(delegate (IntPtr h, IntPtr l)
+                {
+                    if (h == hwnd) { achou = true; return false; }
+                    return true;
+                }, IntPtr.Zero);
+                return achou;
+            }
+            catch { return false; }
+        }
+
         private void Fechar(IntPtr hwnd)
         {
             try
@@ -923,19 +947,23 @@ namespace CmdWatch
                 // da janela e nao IsWindow: medido nesta maquina, IsWindow devolve
                 // falso para janela viva de outro processo, enquanto GetClassNameW
                 // (que o cmdwatch ja usava para ler o titulo) responde certo.
-                if (NomeDaClasse(hwnd).Length > 0) return;
+                if (PollingEngine.Verbose)
+                    Console.Error.WriteLine("[win] destroy hwnd=0x" + hwnd.ToString("X") +
+                        " classe='" + NomeDaClasse(hwnd) + "' isWindow=" + IsWindow(hwnd) +
+                        " visivel=" + IsWindowVisible(hwnd) + " enumerada=" + AindaExiste(hwnd));
 
+                // O evento de destruicao NAO fecha a janela. Ele chega enquanto a
+                // janela ainda esta sendo destruida (medido: 16 de 100 close) e,
+                // quando o aplicativo recria o handle, a janela volta com o MESMO
+                // valor de handle - fechar aqui produzia um "fechada" falso (o
+                // caso medido: form WinForms criado com a janela ja oculta).
+                // A confirmacao fica com a varredura, que so fecha quem sumiu
+                // de verdade da enumeracao de janelas.
                 WindowRecord rec;
                 lock (_lock)
                 {
                     if (!_janelas.TryGetValue(hwnd, out rec)) return;
-                    _janelas.Remove(hwnd);
-                }
-                if (!rec.ClosedAt.HasValue)
-                {
-                    rec.ClosedAt = DateTime.Now;
-                    rec.Visible = false;
-                    if (!rec.Auxiliar) Notificar(rec, "close");
+                    rec.PendingCloseAt = DateTime.Now;
                 }
             }
             catch { }
@@ -951,8 +979,10 @@ namespace CmdWatch
             try
             {
                 var vistas = new List<IntPtr>();
+                var todas = new List<IntPtr>();
                 EnumWindows(delegate (IntPtr h, IntPtr l)
                 {
+                    todas.Add(h);
                     if (EhJanelaRelevante(h)) vistas.Add(h);
                     return true;
                 }, IntPtr.Zero);
@@ -970,19 +1000,51 @@ namespace CmdWatch
                         // fechada. Quem decide que uma janela fechou e o evento de
                         // destruicao - e IsWindow nao serve para isso aqui (medido:
                         // devolve falso para janela viva de outro processo).
-                        // Mas se a janela nao existe mais (a classe nao responde), o
-                        // evento de destruicao se perdeu: em rajada ele chega enquanto
-                        // a janela ainda esta sendo destruida e Fechar o ignora
-                        // (medido: 16 de 100 close). Fecha aqui, senao o registro
-                        // fica para sempre em _janelas.
-                        if (!vistas.Contains(kv.Key) && NomeDaClasse(kv.Key).Length == 0)
+                        // Mas se a janela nao existe mais (a classe nao responde e
+                        // ela sumiu da enumeracao), o evento de destruicao se
+                        // perdeu: em rajada ele chega enquanto a janela ainda esta
+                        // sendo destruida e Fechar o ignora (medido: 16 de 100
+                        // close). Fecha aqui, senao o registro fica para sempre
+                        // em _janelas.
+                        // janela ausente: nao fecha de primeira. Ela pode estar no
+                        // meio de uma recriacao - o aplicativo recria o handle e o
+                        // Windows devolve o MESMO valor (medido: form WinForms
+                        // criado com a janela ja oculta). So fecha quem ficou
+                        // ausente em duas varreduras seguidas.
+                        if (!todas.Contains(kv.Key) && NomeDaClasse(kv.Key).Length == 0)
                         {
+                            if (!r.PendingCloseAt.HasValue)
+                            {
+                                r.PendingCloseAt = DateTime.Now;
+                                continue;
+                            }
+                            // Quem decide e o DONO DA JANELA: enquanto o processo
+                            // dono existir, a janela pode estar viva e este
+                            // processo simplesmente nao consegue ve-la (medido: a
+                            // consulta cross-process falha para certas janelas -
+                            // classe vazia e handle fora da enumeracao, enquanto o
+                            // dono ve a janela normal). So fecha cedo quando o
+                            // dono ja morreu; com o dono vivo, espera 30 s.
+                            double limite = 4;
+                            try
+                            {
+                                if (Processos != null && Processos.Buscar(r.OwnerPid) != null) limite = 30;
+                            }
+                            catch { }
+                            if ((DateTime.Now - r.PendingCloseAt.Value).TotalSeconds < limite) continue;
+                            if (PollingEngine.Verbose)
+                                Console.Error.WriteLine("[win] varredura fechou hwnd=0x" + kv.Key.ToString("X") +
+                                    " isWindow=" + IsWindow(kv.Key) + " visivel=" + IsWindowVisible(kv.Key) +
+                                    " dono=" + r.OwnerPid + " (limite " + limite + "s)");
                             r.ClosedAt = DateTime.Now;
                             r.Visible = false;
                             if (!r.Auxiliar) Notificar(r, "close");
                             _lixo.Add(kv.Key);
                             continue;
                         }
+                        // a janela voltou (o aplicativo recriou o handle): nao
+                        // fechou nada - e o registro continua o mesmo.
+                        if (todas.Contains(kv.Key)) r.PendingCloseAt = null;
                         if (!vistas.Contains(kv.Key) && !r.Visible)
                         {
                             if (!r.HiddenAt.HasValue)
