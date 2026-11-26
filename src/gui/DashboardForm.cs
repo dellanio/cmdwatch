@@ -53,6 +53,14 @@ namespace CmdWatch.Gui
         private CpuSampler _cpuSampler;
         private bool _abaCpu;
         private double _cpuTotal;
+        // memoria da maquina em tempo real (para o indicador da barra)
+        private double _memPct;
+        private long _memUsado;
+        private long _memTotal;
+        // ultimo retrato e ultimo filtro usados na aba de CPU: a lista so e
+        // remontada quando um dos dois muda
+        private CpuSnapshot _cpuUltimoRetrato;
+        private string _cpuUltimoFiltro = "";
         // usuario e integridade por processo: a leitura e cara (abre o token
         // do processo), entao cada processo e consultado uma vez so. A chave
         // leva a hora de inicio: o Windows recicla o PID e o dono muda.
@@ -252,8 +260,8 @@ namespace CmdWatch.Gui
             _activity.LabelA = Lang.T("v2LegCmd");
             _activity.LabelB = Lang.T("v2LegSess");
             _stats.Labels = new[] { Lang.T("v2StatSess"), Lang.T("v2StatWin"), Lang.T("v2StatCpu"),
-                Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
-            _stats.Glyphs = new[] { "\uE756", "\uE737", "\uE950", "\uE81E", "\uE823" };
+                Lang.T("v2StatMem"), Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
+            _stats.Glyphs = new[] { "\uE756", "\uE737", "\uE950", "\uE8B3", "\uE81E", "\uE823" };
             _busca.Cue = Lang.T("v2Search");
             _buscaFluxo.Cue = Lang.T("v2FlowSearch");
             _btnPausa.Glyph = _paused ? "\uE768" : "\uE769";
@@ -805,6 +813,12 @@ namespace CmdWatch.Gui
             }
             catch { }
             Hide();
+            // escondida, a interface nao precisa repintar nem remontar as
+            // listas: o motor continua monitorando (e o log continua sendo
+            // escrito), mas o painel para de gastar CPU
+            try { if (_tick != null) _tick.Stop(); } catch { }
+            try { if (_slow != null) _slow.Stop(); } catch { }
+            try { if (_cpuSampler != null) _cpuSampler.Parar(); } catch { }
         }
 
         private void RestoreFromTray()
@@ -816,6 +830,11 @@ namespace CmdWatch.Gui
             Show();
             WindowState = FormWindowState.Normal;
             Activate();
+            // volta a atualizar o painel
+            try { if (_tick != null && !_tick.Enabled) _tick.Start(); } catch { }
+            try { if (_slow != null && !_slow.Enabled) _slow.Start(); } catch { }
+            try { if (_cpuSampler != null) _cpuSampler.Iniciar(); } catch { }
+            OnSlowTick(null, EventArgs.Empty);
         }
 
         private void OpenLogFile()
@@ -1307,55 +1326,75 @@ namespace CmdWatch.Gui
                 {
                     totalProcessos = snap.Processos.Count;
                     _cpuTotal = snap.UsoTotal;
-                    _cpu.Tabela.Filtrar(snap.Processos, q);
-
-                    // com filtro ativo, um processo que saiu da lista nao pode
-                    // continuar selecionado (o detalhe mostraria algo invisivel)
-                    if (_cpu.Tabela.Filtro.Length > 0 && _cpu.Tabela.SelecionadoPid >= 0)
+                    // a lista so e remontada quando o retrato muda (o amostrador
+                    // publica a cada 1,5 s) ou quando o filtro muda - e apenas
+                    // quando a aba esta aberta
+                    bool retratoNovo = !ReferenceEquals(snap, _cpuUltimoRetrato);
+                    bool filtroNovo = _cpuUltimoFiltro != q;
+                    if (_abaCpu && (retratoNovo || filtroNovo))
                     {
-                        bool visivel = false;
-                        foreach (CpuRow r in _cpu.Tabela.Rows)
-                            if (r.Pid == _cpu.Tabela.SelecionadoPid) { visivel = true; break; }
-                        if (!visivel) _cpu.Tabela.Selecionar(-1);
-                    }
+                        _cpuUltimoRetrato = snap;
+                        _cpuUltimoFiltro = q;
+                        _cpu.Tabela.Filtrar(snap.Processos, q);
 
-                    // sem escolha, o topo da lista fica selecionado (o processo
-                    // que mais esta usando a CPU)
-                    if (_cpu.Tabela.SelecionadoPid < 0 && _cpu.Tabela.Rows.Count > 0)
-                        _cpu.Tabela.Selecionar(_cpu.Tabela.Rows[0].Pid);
-
-                    // detalhe do processo escolhido: usuario e integridade
-                    // sao lidos sob demanda (uma consulta por processo)
-                    CpuRow sel = null;
-                    foreach (CpuRow r in snap.Processos)
-                        if (r.Pid == _cpu.Tabela.SelecionadoPid) { sel = CopiaCpu(r); break; }
-                    if (sel != null)
-                    {
-                        // usuario e integridade: lidos uma vez por processo
-                        // (o token nao muda enquanto o processo viver)
-                        CpuUser dono;
-                        if (!_cpuUsuarios.TryGetValue(sel.Pid, out dono) || dono.Inicio != sel.StartedAt)
+                        // com filtro ativo, um processo que saiu da lista nao pode
+                        // continuar selecionado (o detalhe mostraria algo invisivel)
+                        if (_cpu.Tabela.Filtro.Length > 0 && _cpu.Tabela.SelecionadoPid >= 0)
                         {
-                            string usr;
-                            bool elev;
-                            if (NativeProcess.TryGetUserAndIntegrity(sel.Pid, out usr, out elev))
-                            {
-                                dono = new CpuUser();
-                                dono.Inicio = sel.StartedAt;
-                                dono.User = usr;
-                                dono.Elevado = elev;
-                                _cpuUsuarios[sel.Pid] = dono;
-                                if (_cpuUsuarios.Count > 2000) _cpuUsuarios.Clear();
-                            }
-                            else dono = null;   // falhou: tenta de novo no proximo tique
+                            bool visivel = false;
+                            foreach (CpuRow r in _cpu.Tabela.Rows)
+                                if (r.Pid == _cpu.Tabela.SelecionadoPid) { visivel = true; break; }
+                            if (!visivel) _cpu.Tabela.Selecionar(-1);
                         }
-                        if (dono != null) { sel.User = dono.User; sel.Elevado = dono.Elevado; }
-                        _cpu.Detalhe.Selecionar(sel, snap.Processos);
+
+                        // sem escolha, o topo da lista fica selecionado (o processo
+                        // que mais esta usando a CPU)
+                        if (_cpu.Tabela.SelecionadoPid < 0 && _cpu.Tabela.Rows.Count > 0)
+                            _cpu.Tabela.Selecionar(_cpu.Tabela.Rows[0].Pid);
+
+                        // detalhe do processo escolhido: usuario e integridade
+                        // sao lidos sob demanda (uma consulta por processo)
+                        CpuRow sel = null;
+                        foreach (CpuRow r in snap.Processos)
+                            if (r.Pid == _cpu.Tabela.SelecionadoPid) { sel = CopiaCpu(r); break; }
+                        if (sel != null)
+                        {
+                            // usuario e integridade: lidos uma vez por processo
+                            // (o token nao muda enquanto o processo viver)
+                            CpuUser dono;
+                            if (!_cpuUsuarios.TryGetValue(sel.Pid, out dono) || dono.Inicio != sel.StartedAt)
+                            {
+                                string usr;
+                                bool elev;
+                                if (NativeProcess.TryGetUserAndIntegrity(sel.Pid, out usr, out elev))
+                                {
+                                    dono = new CpuUser();
+                                    dono.Inicio = sel.StartedAt;
+                                    dono.User = usr;
+                                    dono.Elevado = elev;
+                                    _cpuUsuarios[sel.Pid] = dono;
+                                    if (_cpuUsuarios.Count > 2000) _cpuUsuarios.Clear();
+                                }
+                                else dono = null;   // falhou: tenta de novo no proximo tique
+                            }
+                            if (dono != null) { sel.User = dono.User; sel.Elevado = dono.Elevado; }
+                            _cpu.Detalhe.Selecionar(sel, snap.Processos);
+                        }
+                        else _cpu.Detalhe.Selecionar(null, snap.Processos);
                     }
-                    else _cpu.Detalhe.Selecionar(null, snap.Processos);
                 }
                 _pSessions.TabValues = new[] { _sessions.Rows.Count.ToString(), totalProcessos.ToString() };
                 _pSessions.Invalidate();
+
+                // memoria da maquina em tempo real (uma chamada barata)
+                MemInfo mem;
+                if (MemoriaSistema.Ler(out mem))
+                {
+                    _memPct = mem.Porcentagem;
+                    _memUsado = mem.Usado;
+                    _memTotal = mem.Total;
+                    _stats.Labels[3] = Lang.T("v2StatMem") + " · " + HumanFormat.Memoria(mem.Usado);
+                }
 
                 // estatisticas: valores reais do motor
                 int ativas = 0;
@@ -1364,6 +1403,7 @@ namespace CmdWatch.Gui
                 _stats.Values = new[]
                 {
                     ativas.ToString(), _totalWindows.ToString(), _cpuTotal.ToString("0.0") + "%",
+                    _memPct.ToString("0.0") + "%",
                     _totalSteps.ToString(),
                     ((int)t.TotalHours).ToString("00") + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00")
                 };

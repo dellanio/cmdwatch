@@ -15,7 +15,23 @@ namespace CmdWatch.Gui
     {
         public readonly CpuTable Tabela = new CpuTable();
         public readonly CpuDetail Detalhe = new CpuDetail();
-        private bool _detalheLargo = true;   // 62% / 38%
+        private int _larguraEsq = -1;   // -1 = 62% automatico
+
+        /// <summary>Largura da coluna da lista, em pixels (o resto e o detalhe).</summary>
+        public int LarguraEsq
+        {
+            get { return _larguraEsq < 0 ? (int)((Width - 1) * 0.62) : _larguraEsq; }
+            set
+            {
+                int min = 220;
+                int max = Math.Max(min, Width - 180);
+                if (value < min) value = min;
+                if (value > max) value = max;
+                _larguraEsq = value;
+                PerformLayout();
+                Invalidate();
+            }
+        }
 
         public CpuView()
         {
@@ -30,7 +46,7 @@ namespace CmdWatch.Gui
         {
             base.OnLayout(e);
             int div = 1;
-            int wEsq = (int)((Width - div) * (_detalheLargo ? 0.62 : 1.0));
+            int wEsq = LarguraEsq;
             if (wEsq < 120) wEsq = 120;
             Tabela.SetBounds(0, 0, wEsq, Height);
             Detalhe.SetBounds(wEsq + div, 0, Math.Max(80, Width - wEsq - div), Height);
@@ -42,6 +58,64 @@ namespace CmdWatch.Gui
             g.Clear(Theme.Panel);
             int div = Tabela.Width;
             using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, div, 0, div, Height);
+            // afordio do divisor: o usuario arrasta para escolher a largura
+            if (_sobreDivisor)
+            {
+                using (Pen p = new Pen(Theme.Teal))
+                {
+                    g.DrawLine(p, div - 1, 0, div - 1, Height);
+                    for (int i = 0; i < 3; i++)
+                    {
+                        int y = Height / 2 - 8 + i * 8;
+                        g.DrawLine(p, div - 3, y, div + 1, y);
+                    }
+                }
+            }
+        }
+
+        // ---- divisor arrastavel entre a lista e o detalhe ----
+        private bool _sobreDivisor;
+        private bool _arrastandoDivisor;
+        private int _xDivisor;
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_arrastandoDivisor)
+            {
+                LarguraEsq = e.X - 1;
+                return;
+            }
+            bool sobre = Math.Abs(e.X - Tabela.Width) <= 4;
+            if (sobre != _sobreDivisor) { _sobreDivisor = sobre; Invalidate(); }
+            Cursor = sobre ? Cursors.VSplit : Cursors.Default;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_sobreDivisor) { _sobreDivisor = false; Invalidate(); }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (Math.Abs(e.X - Tabela.Width) > 4) return;
+            _arrastandoDivisor = true;
+            _xDivisor = e.X;
+            Capture = true;
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (_arrastandoDivisor)
+            {
+                _arrastandoDivisor = false;
+                Capture = false;
+                Invalidate();
+            }
         }
     }
 
@@ -69,10 +143,15 @@ namespace CmdWatch.Gui
         // coluna e a flexivel: fica com a sobra da largura).
         private static readonly int[] Larg = { 58, 168, 62, 74, 52, 68, 220 };
 
+        public CpuTable()
+        {
+            SetColunas(Larg, 6, 26);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            int[] xs = Xs(Larg, 6, 26);
+            int[] xs = Xs();
             string[] titulos = {
                 Lang.T("v2CpuColPid"), Lang.T("v2CpuColName"), Lang.T("v2CpuColCpu"),
                 Lang.T("v2CpuColMem"), Lang.T("v2CpuColTh"), Lang.T("v2CpuColStart"),
@@ -118,7 +197,9 @@ namespace CmdWatch.Gui
                     new Rectangle(xs[4], y, xs[5] - xs[4] - 8, RowHeight), Theme.Dim, CellF);
                 TextRenderer.DrawText(g, r.StartedAt == DateTime.MinValue ? "—" : r.StartedAt.ToString("HH:mm:ss"),
                     Theme.MonoSmall, new Rectangle(xs[5], y, xs[6] - xs[5] - 8, RowHeight), Theme.Dim, CellF);
-                TextRenderer.DrawText(g, Mascara.Aplicar(r.CmdLine), Theme.MonoSmall,
+                // a linha de comando ja vem mascarada do amostrador (segredos
+                // nunca aparecem na tela)
+                TextRenderer.DrawText(g, r.CmdLine, Theme.MonoSmall,
                     new Rectangle(xs[6], y, Math.Max(10, xs[7] - xs[6] - 8), RowHeight), Theme.Dim, CellF);
             }
             Rolagem(g);
@@ -127,12 +208,13 @@ namespace CmdWatch.Gui
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            Cursor = _hover >= 0 ? Cursors.Hand : Cursors.Default;
+            Cursor = CursorColuna();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (Redimensionando) return;
             if (e.Button != MouseButtons.Left) return;
 
             // cabecalho: ordena
@@ -157,7 +239,7 @@ namespace CmdWatch.Gui
 
         private int ColunaEm(int x)
         {
-            int[] xs = Xs(Larg, 6, 26);
+            int[] xs = Xs();
             for (int i = 0; i < Larg.Length; i++)
                 if (x >= xs[i] && x < xs[i + 1]) return i;
             return -1;
@@ -322,7 +404,7 @@ namespace CmdWatch.Gui
             y += 4;
             TextRenderer.DrawText(g, Lang.T("v2CpuComando"), Theme.UiSmall, new Rectangle(x, y, w, 14), Theme.Dim, L);
             y += 16;
-            y = TextoLongo(g, Mascara.Aplicar(_sel.CmdLine), x, y, w, Theme.MonoSmall, Theme.Text);
+            y = TextoLongo(g, _sel.CmdLine, x, y, w, Theme.MonoSmall, Theme.Text);
 
             // cadeia de ancestrais
             if (_cadeia.Count > 0)

@@ -232,6 +232,17 @@ namespace CmdWatch.Gui
             }
             return _fundo;
         }
+
+        /// <summary>Libera o bitmap de fundo (o cartao desenhado em cache).</summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { if (_fundo != null) { _fundo.Dispose(); _fundo = null; } }
+                catch { }
+            }
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>
@@ -928,6 +939,18 @@ namespace CmdWatch.Gui
         protected const TextFormatFlags CellF = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
+        // ---- colunas redimensionaveis (arrastar a borda no cabecalho) ----
+        private int[] _larg;        // larguras atuais; a flexivel absorve a sobra
+        private int _flex = -1;     // indice da coluna flexivel
+        private int _x0 = 30;       // margem esquerda
+        private int[] _xs;          // cache das posicoes x (por largura)
+        private int _xsW = -1;
+        private bool _arrastando;
+        private int _colArraste = -1;
+        private int _xArraste;
+        private int[] _largInicial;
+        private int _bordaColuna = -1;   // coluna cuja borda esta sob o mouse
+
         protected TabelaBase()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -938,6 +961,79 @@ namespace CmdWatch.Gui
         protected abstract int Count { get; }
 
         protected int Visiveis { get { return Math.Max(1, (Height - HeaderH) / RowHeight); } }
+
+        /// <summary>
+        /// Declara as colunas: larguras iniciais, qual delas e flexivel (fica
+        /// com a sobra) e a margem esquerda. Depois disso o usuario pode
+        /// arrastar a borda de qualquer coluna no cabecalho.
+        /// </summary>
+        protected void SetColunas(int[] larguras, int flex, int x0)
+        {
+            _larg = (int[])larguras.Clone();
+            _flex = flex;
+            _x0 = x0;
+            _xs = null;
+        }
+
+        /// <summary>Posicoes x das colunas (cache por largura).</summary>
+        protected int[] Xs()
+        {
+            if (_xs != null && _xsW == Width) return _xs;
+            int soma = 0;
+            foreach (int l in _larg) soma += l;
+            int[] w = (int[])_larg.Clone();
+            w[_flex] += Math.Max(0, Width - _x0 - 14 - soma);
+            int[] xs = new int[w.Length + 1];
+            xs[0] = _x0;
+            for (int i = 0; i < w.Length; i++) xs[i + 1] = xs[i] + w[i];
+            _xs = xs; _xsW = Width;
+            return xs;
+        }
+
+        /// <summary>True enquanto o usuario arrasta a borda de uma coluna.</summary>
+        protected bool Redimensionando { get { return _arrastando; } }
+
+        /// <summary>
+        /// Cursor da tabela: o de redimensionar quando o mouse esta sobre a
+        /// borda de uma coluna, o de mao sobre uma linha.
+        /// </summary>
+        protected Cursor CursorColuna()
+        {
+            if (_bordaColuna >= 0) return Cursors.VSplit;
+            return _hover >= 0 ? Cursors.Hand : Cursors.Default;
+        }
+
+        /// <summary>Coluna cuja borda esta perto de x (-1 = nenhuma).</summary>
+        private int BordaEm(int x)
+        {
+            if (_larg == null || _larg.Length < 2) return -1;
+            int[] xs = Xs();
+            for (int i = 0; i < _larg.Length - 1; i++)
+                if (Math.Abs(x - xs[i + 1]) <= 4) return i;
+            return -1;
+        }
+
+        private void Redimensionar(int x)
+        {
+            int delta = x - _xArraste;
+            int nova = _largInicial[_colArraste] + delta;
+            if (nova < 40) nova = 40;
+            int real = nova - _largInicial[_colArraste];
+            _larg[_colArraste] = nova;
+            // a soma das larguras nao muda: a coluna flexivel da o que sobrou
+            if (_flex != _colArraste)
+            {
+                int flex = _largInicial[_flex] - real;
+                if (flex < 60)
+                {
+                    flex = 60;
+                    _larg[_colArraste] = _largInicial[_colArraste] + (_largInicial[_flex] - 60);
+                }
+                _larg[_flex] = flex;
+            }
+            _xs = null;
+            Invalidate();
+        }
 
         /// <summary>Cabecalho: rotulos apagados e a linha divisoria.</summary>
         protected void Cabecalho(Graphics g, string[] titulos, int[] xs)
@@ -951,6 +1047,10 @@ namespace CmdWatch.Gui
             for (int i = 0; i < titulos.Length; i++)
                 TextRenderer.DrawText(g, titulos[i], Theme.UiSmall,
                     new Rectangle(xs[i], 0, Math.Max(10, xs[i + 1] - xs[i] - 8), HeaderH), Theme.Dim, CellF);
+            // marca da borda que pode ser arrastada
+            if (_bordaColuna >= 0 && _bordaColuna + 1 < xs.Length)
+                using (Pen p = new Pen(Theme.Teal))
+                    g.DrawLine(p, xs[_bordaColuna + 1], 2, xs[_bordaColuna + 1], HeaderH - 3);
             int vis = Visiveis;
             if (_scroll > Count - vis) _scroll = Math.Max(0, Count - vis);
             if (_scroll < 0) _scroll = 0;
@@ -974,6 +1074,10 @@ namespace CmdWatch.Gui
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_arrastando) { Redimensionar(e.X); return; }
+            // borda de coluna no cabecalho?
+            int borda = e.Y < HeaderH ? BordaEm(e.X) : -1;
+            if (borda != _bordaColuna) { _bordaColuna = borda; Invalidate(); }
             int idx = e.Y >= HeaderH ? _scroll + (e.Y - HeaderH) / RowHeight : -1;
             if (idx >= Count) idx = -1;
             if (idx != _hover) { _hover = idx; Invalidate(); }
@@ -983,6 +1087,33 @@ namespace CmdWatch.Gui
         {
             base.OnMouseLeave(e);
             if (_hover != -1) { _hover = -1; Invalidate(); }
+            if (_bordaColuna != -1) { _bordaColuna = -1; Invalidate(); }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (e.Y >= HeaderH) return;
+            int col = BordaEm(e.X);
+            if (col < 0 || _larg == null) return;
+            _arrastando = true;
+            _colArraste = col;
+            _xArraste = e.X;
+            _largInicial = (int[])_larg.Clone();
+            Capture = true;
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (_arrastando)
+            {
+                _arrastando = false;
+                _colArraste = -1;
+                Capture = false;
+                Invalidate();
+            }
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -1031,11 +1162,15 @@ namespace CmdWatch.Gui
 
         private static readonly int[] Larg = { 240, 90, 200, 90, 100, 110 };
 
+        public SessionTable()
+        {
+            SetColunas(Larg, 0, 30);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            int[] xs = Xs(Larg, 0, 30);
-            xs[0] = 30;
+            int[] xs = Xs();
             Cabecalho(g, new[] { Lang.T("v2ColScript"), Lang.T("v2ColPid"), Lang.T("v2ColOrigin"),
                 Lang.T("v2ColCmds"), Lang.T("v2ColStart"), Lang.T("v2ColStatus") }, xs);
             if (Rows.Count == 0) { Vazio(g, Lang.T("v2NoSessions")); return; }
@@ -1072,12 +1207,13 @@ namespace CmdWatch.Gui
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            Cursor = _hover >= 0 ? Cursors.Hand : Cursors.Default;
+            Cursor = CursorColuna();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (Redimensionando) return;
             int idx = (e.Y - HeaderH) / RowHeight;
             bool onRow = e.Y >= HeaderH && idx >= 0 && _scroll + idx < Rows.Count;
             if (e.Button == MouseButtons.Right)
@@ -1159,17 +1295,22 @@ namespace CmdWatch.Gui
 
         private int ColunaEm(int x)
         {
-            int[] xs = Xs(Larg, 1, 30);
+            int[] xs = Xs();
             for (int i = 0; i < Larg.Length; i++)
                 if (x >= xs[i] && x < xs[i + 1]) return i;
             return -1;
         }
 
+        public WindowTable()
+        {
+            SetColunas(Larg, 1, 30);
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            Cursor = e.Y < HeaderH ? Cursors.Hand : Cursors.Default;
-            int[] xs = Xs(Larg, 1, 30);
+            Cursor = e.Y < HeaderH && !Redimensionando ? Cursors.Hand : CursorColuna();
+            int[] xs = Xs();
             string text = _hover >= 0 && _hover < Rows.Count && e.X >= xs[2] && e.X < xs[3]
                 ? Rows[_hover].OriginTip : "";
             if (text != _tipText) { _tipText = text; _originTip.SetToolTip(this, text); }
@@ -1189,6 +1330,7 @@ namespace CmdWatch.Gui
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (Redimensionando) return;
             if (e.Button == MouseButtons.Left && e.Y < HeaderH)
             {
                 int col = ColunaEm(e.X);
@@ -1209,7 +1351,7 @@ namespace CmdWatch.Gui
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            int[] xs = Xs(Larg, 1, 30);
+            int[] xs = Xs();
             string[] titulos = {
                 Lang.T("v2ColProc"), Lang.T("v2ColPath"), Lang.T("v2ColOrigin"),
                 Lang.T("v2ColDur"), Lang.T("v2ColStatus")

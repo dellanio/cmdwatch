@@ -37,6 +37,7 @@ namespace CmdWatch
             { "v2Sessions", new[] { "Sessões CMD", "CMD sessions" } },
             { "v2CpuTab", new[] { "Processos CPU", "CPU processes" } },
             { "v2StatCpu", new[] { "Uso da CPU", "CPU usage" } },
+            { "v2StatMem", new[] { "Uso da memória", "Memory usage" } },
             { "v2CpuColPid", new[] { "PID", "PID" } },
             { "v2CpuColName", new[] { "Processo", "Process" } },
             { "v2CpuColCpu", new[] { "CPU", "CPU" } },

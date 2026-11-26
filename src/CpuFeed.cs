@@ -1,9 +1,61 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace CmdWatch
 {
+    /// <summary>
+    /// Memoria fisica da maquina (GlobalMemoryStatusEx): uma chamada, sem
+    /// custo - e o que alimenta o indicador de consumo em tempo real.
+    /// </summary>
+    internal struct MemInfo
+    {
+        /// <summary>Total fisico, em bytes.</summary>
+        public long Total;
+        /// <summary>Disponivel (sem uso), em bytes.</summary>
+        public long Disponivel;
+        /// <summary>Em uso, em bytes.</summary>
+        public long Usado;
+        /// <summary>Percentual em uso (0 a 100).</summary>
+        public double Porcentagem;
+    }
+
+    internal static class MemoriaSistema
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct MEMORYSTATUSEX
+        {
+            public uint dwLength;
+            public uint dwMemoryLoad;
+            public ulong ullTotalPhys;
+            public ulong ullAvailPhys;
+            public ulong ullTotalPageFile;
+            public ulong ullAvailPageFile;
+            public ulong ullTotalVirtual;
+            public ulong ullAvailVirtual;
+            public ulong ullAvailExtendedVirtual;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+        /// <summary>Le a memoria da maquina. False se a chamada falhar.</summary>
+        public static bool Ler(out MemInfo m)
+        {
+            m = new MemInfo();
+            MEMORYSTATUSEX s = new MEMORYSTATUSEX();
+            s.dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX));
+            if (!GlobalMemoryStatusEx(ref s)) return false;
+            m.Total = (long)s.ullTotalPhys;
+            m.Disponivel = (long)s.ullAvailPhys;
+            m.Usado = m.Total - m.Disponivel;
+            if (m.Usado < 0) m.Usado = 0;
+            m.Porcentagem = m.Total > 0 ? m.Usado * 100.0 / m.Total : 0;
+            return true;
+        }
+    }
+
     /// <summary>
     /// Uma linha do retrato de CPU: o que a aba "Processos CPU" do painel
     /// mostra. Montada pelo amostrador (que vive no motor) e lida pela
@@ -78,7 +130,17 @@ namespace CmdWatch
         // instante de nascimento (para saber se o PID foi reusado)
         private readonly Dictionary<int, long> _cpuAnterior = new Dictionary<int, long>();
         private readonly Dictionary<int, DateTime> _nasceuAnterior = new Dictionary<int, DateTime>();
+        // linha de comando e caminho por processo (nao mudam enquanto ele viver)
+        private readonly Dictionary<int, CmdCache> _cmdCache = new Dictionary<int, CmdCache>();
         private DateTime _quando = DateTime.MinValue;
+
+        /// <summary>Linha de comando e caminho de um processo, com a hora de inicio.</summary>
+        private sealed class CmdCache
+        {
+            public DateTime Inicio = DateTime.MinValue;
+            public string Cmd = "";
+            public string Path = "";
+        }
 
         /// <summary>Quantos processos do topo ganham linha de comando lida.</summary>
         private const int TopoComComando = 40;
@@ -192,13 +254,30 @@ namespace CmdWatch
             for (int i = 0; i < linhas.Count && i < TopoComComando; i++)
             {
                 CpuRow r = linhas[i];
-                string cmd;
-                if (NativeProcess.TryGetCommandLineLimited(r.Pid, out cmd) && !string.IsNullOrEmpty(cmd))
+                // a linha de comando e o caminho nao mudam enquanto o processo
+                // viver: le uma vez por (pid, hora de inicio) e guarda. Cada
+                // leitura abre o processo e le o PEB - nao e gratis.
+                CmdCache cc;
+                if (!_cmdCache.TryGetValue(r.Pid, out cc) || cc.Inicio != r.StartedAt)
                 {
-                    r.CmdLine = cmd;
-                    string path;
-                    if (NativeProcess.TryGetProcessStrings(r.Pid, r.Name, out cmd, out path)) r.Path = path;
+                    string cmd, path;
+                    cc = new CmdCache();
+                    cc.Inicio = r.StartedAt;
+                    // uma unica leitura: TryGetProcessStrings ja usa a consulta
+                    // limitada (funciona em processo elevado) e so cai no PEB
+                    // quando ela nao responde
+                    if (NativeProcess.TryGetProcessStrings(r.Pid, r.Name, out cmd, out path))
+                    {
+                        cc.Cmd = cmd ?? "";
+                        cc.Path = path ?? "";
+                    }
+                    _cmdCache[r.Pid] = cc;
+                    if (_cmdCache.Count > 2000) _cmdCache.Clear();
                 }
+                // a mascara de segredos entra aqui: uma vez por amostra, e nao
+                // a cada repaint da tabela
+                r.CmdLine = Mascara.Aplicar(cc.Cmd);
+                r.Path = cc.Path;
             }
 
             var snapFinal = new CpuSnapshot();
