@@ -90,13 +90,9 @@ jobs:
           parameters: |
             version: "${{ steps.vars.outputs.version }}"
 
-      - name: Baixar o binario assinado
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: cmdwatch-unsigned
-          path: signed
-
+      # Nao baixe o artefato de novo aqui: o proprio passo de assinatura ja
+      # extrai o binario assinado em 'signed' (output-artifact-directory).
+      # Baixar o artefato unsigned por cima sobrescreveria a assinatura.
       - name: Calcular o sha256
         id: hash
         shell: pwsh
