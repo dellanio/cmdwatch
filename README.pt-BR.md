@@ -203,9 +203,47 @@ problema**: o arquivo chega à pasta do programa sem a marca, e o Windows o
 executa direto.
 
 A outra forma de tirar o aviso é **assinar o executável** (Authenticode com um
-certificado de uma AC confiável). O cmdwatch ainda **não é assinado** — mas
-também não precisa ser para ser instalado sem aviso pelos dois gerenciadores
-acima.
+certificado de uma AC confiável). O cmdwatch está se candidatando ao programa da
+[SignPath Foundation](https://signpath.org/), que emite certificados Authenticode
+gratuitos a projetos open source qualify — veja a
+[Política de assinatura](#política-de-assinatura-code-signing-policy) abaixo.
+Enquanto o certificado não chega, os binários publicados **ainda não são
+assinados**, mas também não precisam ser para ser instalado sem aviso pelos dois
+gerenciadores acima.
+
+### Política de assinatura (Code signing policy)
+
+O cmdwatch participa do programa da [SignPath Foundation](https://signpath.org/):
+o executável de cada release é assinado com um certificado Authenticode emitido
+em nome da **SignPath Foundation**, e cada pedido de assinatura é aprovado por um
+aprovador do projeto antes de a release ser publicada.
+
+> Free code signing provided by [SignPath.io](https://about.signpath.io/),
+> certificate by [SignPath Foundation](https://signpath.org/)
+
+| Papel | Membro |
+|---|---|
+| **Authors** — podem commitar sem revisão adicional | [dellanio](https://github.com/dellanio) (único mantenedor e dono do repositório) |
+| **Reviewers** — revisam toda mudança proposta por quem não é committer | [dellanio](https://github.com/dellanio) |
+| **Approvers** — aprovam cada pedido de assinatura | [dellanio](https://github.com/dellanio) |
+
+**Privacidade:** This program will not transfer any information to other networked
+systems unless specifically requested by the user or the person installing or
+operating it. — Ou seja: o cmdwatch não transfere nenhuma informação para outros
+sistemas em rede sem solicitação explícita de quem o instala ou o opera. Não há
+telemetria, verificação de atualização nem código de rede: os únicos arquivos
+gravados são o log local (`cmdwatch-log.jsonl`) e as preferências locais
+(`%APPDATA%\cmdwatch\ui.cfg`). Veja também o
+[Modelo de Segurança & Privacidade](#-modelo-de-segurança--privacidade).
+
+**Desinstalação:** o cmdwatch é um programa portátil de arquivo único. Não
+instala nada e não altera configuração do sistema — apagar o `cmdwatch.exe` (e,
+se quiser, a pasta `%APPDATA%\cmdwatch`) remove o programa por completo.
+
+**Situação:** o pedido de assinatura à SignPath Foundation foi enviado em
+2026-11-26 e está em análise. Enquanto o certificado não é emitido, os binários
+publicados seguem sem assinatura — instale pelo Scoop ou pelo winget para evitar
+o aviso do SmartScreen.
 
 ### Abrir o Painel Gráfico
 Dê **duplo clique** no `cmdwatch.exe` ou execute via terminal:

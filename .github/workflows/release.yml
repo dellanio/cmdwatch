@@ -1,0 +1,156 @@
+# Release do cmdwatch: build verificavel -> assinatura opcional -> publicacao.
+#
+# Fluxo (a assinatura so acontece depois que a Fundacao SignPath aprovar o
+# projeto e o repositorio receber organization-id, project-slug,
+# signing-policy-slug e o token de API):
+#
+#   1. tag vX.Y.Z dispara este workflow
+#   2. build.ps1 compila o .exe em windows-latest (runner hospedado do GitHub)
+#   3. upload-artifact publica o binario sem assinatura
+#   4. submit-signing-request envia o pedido; um Approver aprova no painel
+#      do SignPath; o workflow espera e baixa o binario assinado
+#   5. a release e criada com o .exe assinado (ou sem assinatura, se o
+#      projeto ainda nao foi aprovado pela Fundacao) e o .sha256 correspondente
+#
+# Detalhes, variaveis e o rascunho da aplicacao:
+# packaging/signpath/README.md
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da release (ex.: v1.3.3)'
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    name: build, assinar e publicar
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compilar (Roslyn via build.ps1)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+
+      - name: Verificar metadata do executavel
+        shell: pwsh
+        run: |
+          $fvi = [Diagnostics.FileVersionInfo]::GetVersionInfo('out\cmdwatch.exe')
+          if ($fvi.ProductName -ne 'cmdwatch') { throw "ProductName invalido: '$($fvi.ProductName)'" }
+          if ([string]::IsNullOrWhiteSpace($fvi.ProductVersion)) { throw 'ProductVersion vazio' }
+          Write-Host "ProductName=$($fvi.ProductName) ProductVersion=$($fvi.ProductVersion)"
+
+      - name: Preparar a versao
+        id: vars
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          # a versao que vai no ProductVersion e sem o 'v' da tag
+          $version = $env:TAG -replace '^v', ''
+          Write-Host "tag=$env:TAG version=$version"
+          "tag=$env:TAG" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publicar o binario sem assinatura
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmdwatch-unsigned
+          path: out/cmdwatch.exe
+          archive: false
+          if-no-files-found: error
+
+      # Off ate a Fundacao aprovar o projeto: sem SIGNPATH_ORGANIZATION_ID
+      # o passo e ignorado e a release sai sem assinatura (como hoje).
+      - name: Assinar (SignPath Foundation)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+          skip-decompress: true
+          parameters: |
+            version: "${{ steps.vars.outputs.version }}"
+
+      - name: Baixar o binario assinado
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: cmdwatch-unsigned
+          path: signed
+
+      - name: Calcular o sha256
+        id: hash
+        shell: pwsh
+        run: |
+          $exe = if (Test-Path 'signed\cmdwatch.exe') { 'signed\cmdwatch.exe' } else { 'out\cmdwatch.exe' }
+          $sign = if (Test-Path 'signed\cmdwatch.exe') { 'assinado' } else { 'sem assinatura' }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToUpper()
+          [IO.File]::WriteAllText('cmdwatch.exe.sha256', "$hash  cmdwatch.exe", (New-Object Text.UTF8Encoding($false)))
+          Write-Host "exe: $exe ($sign)"
+          Write-Host "sha256: $hash"
+          "exe=$exe" >> $env:GITHUB_OUTPUT
+          "sha=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Publicar a release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          EXE: ${{ steps.hash.outputs.exe }}
+          SHA: ${{ steps.hash.outputs.sha }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "a release $env:TAG ja existe - mantida como esta"
+            exit 0
+          }
+          $notas = @"
+          ## cmdwatch $env:TAG
+
+          | | |
+          |---|---|
+          | SHA-256 | ``$env:SHA`` |
+
+          ```
+          $env:SHA  cmdwatch.exe
+          ```
+
+          ### Instalar
+
+          ```powershell
+          scoop bucket add dellanio https://github.com/dellanio/scoop-bucket
+          scoop install cmdwatch
+          ```
+
+          Ou pelo winget, quando o manifesto for aprovado:
+          ```powershell
+          winget install dellanio.cmdwatch
+          ```
+
+          Ou direto do navegador (o arquivo baixado pelo navegador recebe o
+          Mark-of-the-Web e o Windows pode mostrar o aviso do SmartScreen ate
+          o arquivo ganhar reputacao).
+          "@
+          [IO.File]::WriteAllText('release-notes.md', $notas, (New-Object Text.UTF8Encoding($false)))
+          gh release create $env:TAG $env:EXE 'cmdwatch.exe.sha256' --title "cmdwatch $env:TAG" --notes-file 'release-notes.md'
+          if ($LASTEXITCODE -ne 0) { throw 'falha ao criar a release' }

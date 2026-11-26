@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Configuracao de artefato do SignPath para o cmdwatch.
+
+  Copiar e colar em SignPath.io -> seu projeto -> Artifact Configurations.
+  O parametro "version" e enviado pelo workflow (.github/workflows/release.yml)
+  e precisa bater exatamente com o ProductVersion gravado no .exe pelo build.ps1
+  (ex.: 1.3.3, sem o "v" da tag).
+
+  As restricoes de metadata nao sao decorativas: o SignPath so assina o binario
+  se o resource de versao do PE tiver ProductName = "cmdwatch" e ProductVersion
+  igual ao parametro. O build.ps1 gera essa metadata e falha o build se ela
+  faltar.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <pe-file path="cmdwatch.exe" product-name="cmdwatch" product-version="${version}">
+    <authenticode-sign />
+  </pe-file>
+</artifact-configuration>

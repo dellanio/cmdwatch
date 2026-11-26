@@ -1,0 +1,58 @@
+# Build verificavel do cmdwatch.
+#
+# A Fundacao SignPath exige que o binario assinado venha de um build
+# verificavel, executado em runner hospedado do GitHub. Este workflow e a
+# prova publica disso: compila o .exe, confere a metadata de produto/versao
+# (que o SignPath exige) e guarda o artefato.
+#
+# Ver packaging/signpath/README.md para o fluxo completo de assinatura.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: compilar e verificar
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compilar (Roslyn via build.ps1)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+
+      # O SignPath so assina binarios com ProductName e ProductVersion no
+      # resource de versao do PE. Se o build perder essa metadata, o
+      # workflow falha aqui em vez de falhar na hora de assinar.
+      - name: Verificar metadata do executavel
+        shell: pwsh
+        run: |
+          $fvi = [Diagnostics.FileVersionInfo]::GetVersionInfo('out\cmdwatch.exe')
+          if ($fvi.ProductName -ne 'cmdwatch') { throw "ProductName invalido: '$($fvi.ProductName)'" }
+          if ([string]::IsNullOrWhiteSpace($fvi.ProductVersion)) { throw 'ProductVersion vazio' }
+          Write-Host "ProductName=$($fvi.ProductName) ProductVersion=$($fvi.ProductVersion) FileVersion=$($fvi.FileVersion)"
+
+      - name: Bateria de testes (GUI)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\test-ocultar-windows.ps1
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\test-limpar-recolher.ps1
+
+      - name: Guardar o executavel
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmdwatch-${{ github.sha }}
+          path: out/cmdwatch.exe
+          archive: false
+          if-no-files-found: error

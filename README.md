@@ -203,9 +203,44 @@ the file reaches the program folder without the mark and Windows runs it
 directly.
 
 The other way to remove the warning is to **sign the executable** (Authenticode
-with a certificate from a trusted CA). The cmdwatch is **not signed yet** — but
-it does not need to be to install without a warning through the two package
-managers above.
+with a certificate from a trusted CA). cmdwatch is applying to the
+[SignPath Foundation](https://signpath.org/) program, which issues free
+Authenticode certificates to qualifying open-source projects — see the
+[Code signing policy](#code-signing-policy) below. Until the certificate
+arrives, the published binaries are **not signed yet**, but they do not need to
+be to install without a warning through the two package managers above.
+
+### Code signing policy
+
+cmdwatch takes part in the [SignPath Foundation](https://signpath.org/) program:
+the Windows executable of each release is signed with an Authenticode
+certificate issued to **SignPath Foundation**, and every signing request is
+approved by an approver of this project before the release is published.
+
+> Free code signing provided by [SignPath.io](https://about.signpath.io/),
+> certificate by [SignPath Foundation](https://signpath.org/)
+
+| Role | Member |
+|---|---|
+| **Authors** — trusted to commit without further review | [dellanio](https://github.com/dellanio) (sole maintainer and repository owner) |
+| **Reviewers** — review every change proposed by a non-committer | [dellanio](https://github.com/dellanio) |
+| **Approvers** — approve each signing request | [dellanio](https://github.com/dellanio) |
+
+**Privacy:** This program will not transfer any information to other networked
+systems unless specifically requested by the user or the person installing or
+operating it. There is no telemetry, no update check and no network code in
+cmdwatch — the only files it writes are the local log (`cmdwatch-log.jsonl`)
+and the local preferences (`%APPDATA%\cmdwatch\ui.cfg`). See also the
+[Security & Privacy Model](#-security--privacy-model) section.
+
+**Uninstall:** cmdwatch is a portable single-file program. It installs nothing
+and changes no system setting — deleting `cmdwatch.exe` (and, optionally, the
+`%APPDATA%\cmdwatch` folder) removes it completely.
+
+**Status:** the application to the SignPath Foundation was submitted on
+2026-11-26 and is under review. Until the certificate is issued, the released
+binaries are unsigned — install through Scoop or winget to avoid the
+SmartScreen prompt.
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
