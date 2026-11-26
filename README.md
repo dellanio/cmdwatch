@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Runtime](https://img.shields.io/badge/Runtime-.NET%20Framework%204.8%20(Built--in)-512BD4.svg?style=flat&logo=dotnet)](https://dotnet.microsoft.com)
 [![Language](https://img.shields.io/badge/Language-C%23-239120.svg?style=flat&logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
-[![Binary](https://img.shields.io/badge/Binary-Single%20EXE%20(~580KB)%20%7C%20Portable-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
+[![Binary](https://img.shields.io/badge/Binary-Single%20EXE%20(~600KB)%20%7C%20Portable-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
 [![Privileges](https://img.shields.io/badge/Privileges-No%20Admin%20Required-blue.svg?style=flat)](https://github.com/dellanio/cmdwatch)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](LICENSE)
 
@@ -45,6 +45,14 @@
       </td>
       <td align="center">
         <img src="docs/recolhido.png" alt="Collapsible Cards" width="380" />
+      </td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2"><b>"CPU Processes" tab: a live picture of the machine, list + detail</b></td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2">
+        <img src="docs/processos-cpu.png" alt="CPU Processes Tab" width="820" />
       </td>
     </tr>
   </table>
@@ -89,6 +97,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
   - *ETW Kernel Mode (with Admin):* Intercepts kernel trace events in real time without missing short-lived scripts (< 25 ms).
 - 🔒 **Active Secret Masking:** Automatically redacts tokens, passwords, API keys, `Authorization: Bearer` headers, and AWS credentials before saving to logs or rendering on screen.
 - 🛑 **Safe Process Tree Termination (PID Reuse Guard):** Safely terminates runaway scripts and child process trees directly from the UI, with strict creation timestamp verification (`GetProcessTimes`) preventing accidental termination of recycled PIDs.
+- 🖥️ **Live CPU & Process Inspector:** a second tab inside the sessions card lists every process on the machine with its CPU share, private memory, thread count and start time, next to a detail pane with the owner, session, command line and ancestry chain. The numbers come from the kernel snapshot, at no extra read cost.
 - 🎨 **Custom Neon UI:** Lightweight GDI+ rendering with Dark and Light themes, real-time search, sortable columns, and background minimization to the Windows System Tray.
 
 ---
@@ -112,6 +121,7 @@ flowchart TD
         AST["Batch AST & Call Tree Resolver"]
         Masker["Mascara (Secrets Sanitizer)"]
         SafeKill["ProcessControl (PID + Timestamp Guard)"]
+        CpuSampler["CpuSampler (kernel snapshot, 1.5 s)"]
     end
 
     subgraph Output ["User Interfaces & Storage"]
@@ -121,12 +131,14 @@ flowchart TD
     end
 
     ProcLife --> EngineChoice
+    ProcLife --> CpuSampler
     EngineChoice -->|"Admin"| EtwEng
     EngineChoice -->|"Standard"| PollEng
     PollEng & EtwEng --> PEBReader
     WinEvents & Terminals --> WinWatcher
     PEBReader & WinWatcher --> AST
     AST --> Masker
+    CpuSampler --> Masker
     Masker --> GUI
     Masker --> CLI
     Masker --> JSONL
@@ -144,7 +156,7 @@ flowchart TD
 
 Download the pre-compiled binary:
 
-**[⬇ Download cmdwatch v1.1.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Download cmdwatch v1.1.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
@@ -189,6 +201,74 @@ cmdwatch.exe trace script.cmd
 | **polling** *(default)* | Standard User | Everyday development | Uses `CreateToolhelp32Snapshot` and `SystemProcessInformation`. Adaptive intervals: 500 ms (idle), 50 ms (active). |
 | **etw** | Administrator | Ultra-short scripts (< 50 ms) | Creates a dedicated Event Tracing for Windows session (`CMDWatcher-Processos`). Kernel passes process command-lines directly in the event payload. |
 | **wmi** | Administrator | Alternate diagnostics | Listens to `Win32_ProcessStartTrace` events. |
+
+---
+
+## 🖥️ The "CPU Processes" Tab
+
+The **CMD Sessions** card became a two-tab card: **CMD Sessions** (unchanged behavior) and
+**CPU Processes**, which shows a live picture of the machine. The KPI strip gains a fifth card,
+**CPU usage**, with the machine-wide total in real time.
+
+![CPU Processes tab](docs/processos-cpu.png)
+
+**The list (62% of the card)** has one row per process:
+
+| Column | Source |
+|---|---|
+| **PID** | from the kernel snapshot |
+| **Process** | executable name |
+| **CPU** | share of the whole machine right now, with a bar |
+| **Private mem** | private working set (see the caveat below) |
+| **Threads** | thread count |
+| **Started** | process creation time |
+| **Command** | command line (with the secret masker applied) |
+
+Clicking a header sorts by that column; the top search box filters the list.
+
+**The detail pane (38% of the card)** shows, for the selected process: PID and name, an **elevated**
+pill when the process runs with high integrity, the **user** who owns it, the **session**, the
+**start time** and how long it has been alive, **instant and average CPU**, **memory** and
+**threads**, the **executable**, the **command line** wrapped over several lines, and the
+**ancestry chain** (who called whom).
+
+### How the numbers are computed
+
+The kernel snapshot (`NtQuerySystemInformation`) already returns, in the same buffer and at **no
+extra read cost**, the accumulated CPU time, the memory, the thread count and the creation time of
+every process. The panel compares two snapshots (one every 1.5 s, on its own thread, which does not
+disturb the event engine) and turns the difference in CPU time into a percentage:
+
+- the percentage is **normalized by the number of cores** (0–100%): the sum of all processes equals the machine total (measured: 21.6% of the processes = 21.6% of the machine);
+- the **machine total** leaves out the idle process (PID 0);
+- the **average** is computed separately, over the whole life of the process;
+- the **command line** is only read for the top 40 processes (each read is a PEB call).
+
+### Honest limitations
+
+- **Memory is the *private working set***, not total RSS — the kernel snapshot does not carry the raw working set. That is why the column reads "Private mem" (a shared `svchost.exe` shows only a few KB).
+- The percentage is **of the whole machine**, not of a single core: 6% means 6% of all 16 cores together.
+- **Working directory and environment variables are not read**: they require `PROCESS_VM_READ` and fail on elevated processes.
+- **User and integrity level** come from the process token, read once per process (the token does not change while it lives); protected processes may not answer.
+- The list shows **every** process on the machine (500+ in normal use); the snapshot costs a few milliseconds.
+
+---
+
+## 🐛 v1.1.1 fixes (field test of v1.1.0)
+
+Four defects found during the field test, all measured before being fixed:
+
+| Defect | Measured cause | Fix |
+|---|---|---|
+| **Elevated processes went missing from the log** | the limited query called a function name that does not exist in `ntdll.dll`; the error was swallowed by a `catch` and the read fell back to the PEB — which an elevated process blocks | correct `EntryPoint`: the query now reads the command line of elevated processes (measured: **6 of 6** high-integrity processes; the `Higiene-Remocao` scheduled task, which runs as administrator, was captured live with the elevated command line) |
+| **The window showed the program, not who called it** | the author was picked as the **most recent** console client (the transient `git.exe`) | the author is now the **nearest ancestor inside the console, excluding the root**: in a `cmd.exe → python.exe → git.exe` chain the author is the `python.exe` (the caller), and the `git.exe` is recorded as the *program* in execution (the `program` field) |
+| **A hidden window turned into "closed"** | for some windows of another process the cross-process query **does not answer** (empty class, handle outside the enumeration) — **while the window owner sees it normally**; cmdwatch concluded it "died" | the destroy event no longer closes anything (it only flags); the sweep closes only after **two consecutive sweeps** of absence and, while the **owning process** is alive, waits 30 s. Measured: hiding → `window_hide` with `closed=false`, and the window **does not** come back as a new window |
+| **`sessionId` coming out as 59133952** | the field was read at the wrong offset (`0x68` = `UniqueProcessKey`) | corrected to `0x64`, measured across 859 records on this machine |
+
+**Honest limitation:** when a window does not answer the cross-process query, cmdwatch **cannot see it
+again** — it stays registered as *hidden* instead of returning to "visible". And a `.cmd` with **no
+window at all** (`CreateNoWindow`) that lives for ~90 ms still depends on the engine interval (in the
+slow 500 ms regime: 0/6 to 2/8; with `--interval 50`: 4/6 to 8/8).
 
 ---
 

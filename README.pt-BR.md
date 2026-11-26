@@ -7,7 +7,7 @@
 [![Plataforma](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6.svg?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Runtime](https://img.shields.io/badge/Runtime-.NET%20Framework%204.8%20(Nativo)-512BD4.svg?style=flat&logo=dotnet)](https://dotnet.microsoft.com)
 [![Linguagem](https://img.shields.io/badge/Linguagem-C%23-239120.svg?style=flat&logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
-[![Binário](https://img.shields.io/badge/Binário-EXE%20Único%20(~580KB)%20%7C%20Portátil-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
+[![Binário](https://img.shields.io/badge/Binário-EXE%20Único%20(~600KB)%20%7C%20Portátil-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
 [![Privilégios](https://img.shields.io/badge/Privilégios-Sem%20Admin%20Obrigatório-blue.svg?style=flat)](https://github.com/dellanio/cmdwatch)
 [![Licença](https://img.shields.io/badge/Licença-MIT-green.svg?style=flat)](LICENSE)
 
@@ -45,6 +45,14 @@
       </td>
       <td align="center">
         <img src="docs/recolhido.png" alt="Cartões Recolhidos" width="380" />
+      </td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2"><b>Aba "Processos CPU": retrato ao vivo da máquina, com lista e detalhe</b></td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2">
+        <img src="docs/processos-cpu.png" alt="Aba Processos CPU" width="820" />
       </td>
     </tr>
   </table>
@@ -89,6 +97,7 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
   - *Modo ETW (Kernel Trace):* Com privilégio de Administrador, escuta eventos em tempo real do kernel do Windows sem perder scripts ultracurtos (~25 ms).
 - 🔒 **Máscara Automática de Segredos:** Sanitiza tokens, senhas, chaves de API, cabeçalhos `Bearer` e credenciais AWS antes de gravar em disco ou renderizar na tela.
 - 🛑 **Encerramento Seguro contra Colisão de PID:** Permite encerrar scripts e árvores de processos pela UI com verificação rigorosa de data/hora de criação do PID (`GetProcessTimes`), impedindo matar processos reciclados.
+- 🖥️ **Inspetor de CPU e Processos ao Vivo:** uma segunda aba dentro do cartão de sessões lista todos os processos da máquina com consumo de CPU, memória privada, threads e hora de início, ao lado de um painel de detalhe com dono, sessão, linha de comando e cadeia de ancestrais. Os números saem do retrato do kernel, sem custo extra de leitura.
 - 🎨 **Interface Neon Customizada:** Construída em GDI+ puro sem frameworks pesados, com suporte a tema escuro/claro, busca em tempo real, ordenação de colunas e minimização para a Área de Notificação (Tray).
 
 ---
@@ -112,6 +121,7 @@ flowchart TD
         AST["Batch AST & Call Tree Resolver"]
         Masker["Mascara (Sanitizador de Credenciais)"]
         SafeKill["ProcessControl (Validação de PID via GetProcessTimes)"]
+        CpuSampler["CpuSampler (retrato do kernel, 1,5 s)"]
     end
 
     subgraph Output ["Interfaces do Usuário"]
@@ -121,12 +131,14 @@ flowchart TD
     end
 
     ProcLife --> EngineChoice
+    ProcLife --> CpuSampler
     EngineChoice -->|"Admin"| EtwEng
     EngineChoice -->|"Padrão"| PollEng
     PollEng & EtwEng --> PEBReader
     WinEvents & Terminals --> WinWatcher
     PEBReader & WinWatcher --> AST
     AST --> Masker
+    CpuSampler --> Masker
     Masker --> GUI
     Masker --> CLI
     Masker --> JSONL
@@ -144,7 +156,7 @@ flowchart TD
 
 Baixe o executável pronto para uso:
 
-**[⬇ Baixar cmdwatch v1.1.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Baixar cmdwatch v1.1.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Abrir o Painel Gráfico
 Dê **duplo clique** no `cmdwatch.exe` ou execute via terminal:
@@ -189,6 +201,56 @@ cmdwatch.exe trace script.cmd
 | **polling** *(padrão)* | Usuário Comum | Uso diário geral | Consulta snapshots de processos pelo `CreateToolhelp32Snapshot` e `SystemProcessInformation`. Intervalo dinâmico de 500 ms (repouso) e 50 ms (atividade). |
 | **etw** | Administrador | Scripts ultracurtos (< 50 ms) | Cria uma sessão dedicada no Event Tracing for Windows (`CMDWatcher-Processos`). O kernel entrega a linha de comando direto no payload do evento, sem perdas. |
 | **wmi** | Administrador | Diagnóstico alternativo | Escuta `Win32_ProcessStartTrace`. |
+
+---
+
+## 🖥️ Aba "Processos CPU"
+
+O cartão **Sessões CMD** virou um cartão com duas abas: **Sessões CMD** (o comportamento de sempre) e
+**Processos CPU**, que mostra a fotografia viva da máquina. Na barra de indicadores aparece um quinto
+card, **Uso da CPU**, com o total da máquina em tempo real.
+
+![Aba Processos CPU](docs/processos-cpu.png)
+
+**A lista (62% do cartão)** traz uma linha por processo:
+
+| Coluna | Origem |
+|---|---|
+| **PID** | do retrato do kernel |
+| **Processo** | nome do executável |
+| **CPU** | % do total da máquina neste instante, com barra |
+| **Mem. privada** | working set privado (veja a ressalva abaixo) |
+| **Threads** | número de threads do processo |
+| **Início** | hora em que o processo nasceu |
+| **Comando** | linha de comando (com a máscara de segredos aplicada) |
+
+Clicar no cabeçalho ordena pela coluna; a busca da barra superior filtra a lista.
+
+**O painel de detalhe (38% do cartão)** mostra, do processo escolhido: PID e nome, a pílula
+**elevado** quando o processo roda com integridade alta, o **usuário** dono do processo, a **sessão**,
+o **início** e há quanto tempo está vivo, a **CPU instantânea e a média** desde o início, a
+**memória** e os **threads**, o **executável**, a **linha de comando** quebrada em várias linhas e a
+**cadeia de ancestrais** (quem chamou quem).
+
+### Como os números são calculados
+
+O retrato do kernel (`NtQuerySystemInformation`) já devolve, no mesmo buffer e **sem custo extra de
+leitura**, o tempo de CPU acumulado, a memória, o número de threads e a hora de criação de cada
+processo. O painel compara dois retratos (um a cada 1,5 s, numa thread própria que não interfere no
+motor de eventos) e a diferença do tempo de CPU vira o percentual:
+
+- o percentual é **normalizado pelo total de núcleos** (0–100%): a soma dos processos dá o total da máquina (medido: 21,6% dos processos = 21,6% da máquina);
+- o **total da máquina** deixa de fora o processo ocioso (PID 0);
+- a **média** é calculada à parte, sobre toda a vida do processo;
+- a **linha de comando** só é lida para os 40 processos do topo (cada leitura é uma chamada ao PEB).
+
+### Limitações honestas
+
+- **Memória é o *working set privado***, não o RSS total — o retrato do kernel não traz o working set bruto. Por isso a coluna se chama "Mem. privada" (um `svchost.exe` compartilhado aparece com poucos KB).
+- O percentual é **do total da máquina**, não de um núcleo: 6% significa 6% dos 16 núcleos somados.
+- **Diretório de trabalho e variáveis de ambiente não são lidos**: exigem `PROCESS_VM_READ` e falham em processo elevado.
+- **Usuário e integridade** vêm do token do processo, lidos uma vez por processo (o token não muda enquanto ele viver); processos protegidos podem não responder.
+- A lista mostra **todos** os processos da máquina (mais de 500 em uso comum); o custo do retrato é de poucos milissegundos.
 
 ---
 

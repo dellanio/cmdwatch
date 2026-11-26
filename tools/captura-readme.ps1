@@ -6,7 +6,7 @@ param([string]$Exe = "$PSScriptRoot\..\out\cmdwatch.exe", [string]$Dest = "$PSSc
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
 if (-not ('PW' -as [type])) { Add-Type -ReferencedAssemblies System.Drawing, Accessibility @"
-using System; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;
+using System; using System.Text; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;
 public static class PW {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
@@ -18,16 +18,31 @@ public static class PW {
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int s);
   public static void Shot(IntPtr h, string path) {
     RECT w; GetWindowRect(h, out w); RECT e;
-    if (DwmGetWindowAttribute(h, 9, out e, Marshal.SizeOf(typeof(RECT))) != 0) e = w;
+    int rc = DwmGetWindowAttribute(h, 9, out e, Marshal.SizeOf(typeof(RECT)));
+    if (rc != 0) e = w;
+    Console.WriteLine("  shot " + path + ": win=" + (w.R-w.L) + "x" + (w.B-w.T) +
+      " dwm=" + (e.R-e.L) + "x" + (e.B-e.T) + " rc=" + rc);
     using (Bitmap b = new Bitmap(w.R - w.L, w.B - w.T)) {
       using (Graphics g = Graphics.FromImage(b)) { IntPtr dc = g.GetHdc(); PrintWindow(h, dc, 2); g.ReleaseHdc(dc); }
       Rectangle c = new Rectangle(e.L - w.L, e.T - w.T, e.R - e.L, e.B - e.T);
+      if (c.X < 0) c.X = 0; if (c.Y < 0) c.Y = 0;
+      if (c.Width > b.Width - c.X) c.Width = b.Width - c.X;
+      if (c.Height > b.Height - c.Y) c.Height = b.Height - c.Y;
       using (Bitmap o = b.Clone(c, b.PixelFormat)) o.Save(path, ImageFormat.Png);
     }
   }
   delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr l);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  // filho cujo texto COMECA com o prefixo (o cartao de sessoes publica
+  // "cartao_sessoes|linhas=..." na janela, para a automacao de UI)
+  public static IntPtr FilhoPrefixo(IntPtr pai, string prefixo) {
+    IntPtr achou = IntPtr.Zero;
+    EnumChildWindows(pai, delegate (IntPtr h, IntPtr l) {
+      var sb = new StringBuilder(256); GetWindowText(h, sb, 256);
+      if (sb.ToString().StartsWith(prefixo)) { achou = h; return false; } return true; }, IntPtr.Zero);
+    return achou;
+  }
   public static IntPtr Filho(IntPtr pai, string texto) {
     IntPtr achou = IntPtr.Zero;
     EnumChildWindows(pai, delegate (IntPtr h, IntPtr l) {
@@ -81,6 +96,12 @@ $demo = Join-Path (Resolve-Path "$PSScriptRoot\..").Path '.build\exemplo'
 New-Item -ItemType Directory -Force $demo | Out-Null
 Set-Content (Join-Path $demo 'exemplo-backup.cmd') "@echo off`r`ntitle exemplo - backup noturno`r`necho copiando relatorios`r`nwhere git`r`nping -n 3 127.0.0.1 >nul`r`ndir /b`r`nping -n 60 127.0.0.1 >nul" -Encoding ASCII
 Set-Content (Join-Path $demo 'exemplo-sincroniza.cmd') "@echo off`r`necho sincronizando`r`nwhere cmd`r`nping -n 2 127.0.0.1 >nul`r`ngit --version`r`nping -n 60 127.0.0.1 >nul" -Encoding ASCII
+
+# carga de CPU controlada, numa pasta SEM a palavra "exemplo": assim o processo
+# so aparece quando a busca e "carga" e nao suja as outras capturas
+$carga = Join-Path (Resolve-Path "$PSScriptRoot\..").Path '.build\carga'
+New-Item -ItemType Directory -Force $carga | Out-Null
+Set-Content (Join-Path $carga 'carga-cpu.cmd') "@echo off`r`ntitle carga de cpu`r`n:loop`r`nset /a n+=1`r`ngoto loop" -Encoding ASCII
 # captura em PT-BR com os cartoes abertos: guarda o ui.cfg e o ajusta (restaurado no final)
 $cfg = Join-Path $env:APPDATA 'cmdwatch\ui.cfg'; $cfgAntes = if (Test-Path $cfg) { [IO.File]::ReadAllText($cfg) } else { $null }
 $cfgNovo = @(@(if ($cfgAntes -ne $null) { $cfgAntes -split "`r?`n" }) | Where-Object { $_ -and $_ -notmatch '^(recolhidos|lang)=' }) + 'lang=pt-br'; New-Item -ItemType Directory -Force (Split-Path $cfg) | Out-Null; [IO.File]::WriteAllText($cfg, ($cfgNovo -join "`r`n"))
@@ -94,6 +115,8 @@ $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.WorkingDirector
 $o = [Diagnostics.Process]::Start($psi)
 Start-Sleep 2
 $v = Start-Process cmd.exe -ArgumentList '/c', "`"$demo\exemplo-backup.cmd`"" -WorkingDirectory $demo -PassThru
+# processo de carga (sem janela): alimenta a aba "Processos CPU"
+$cargaProc = Start-Process cmd.exe -ArgumentList '/c', "`"$carga\carga-cpu.cmd`"" -WorkingDirectory $carga -WindowStyle Hidden -PassThru
 Start-Sleep 9
 # busca "exemplo" na barra superior: so as sessoes e janelas da demonstracao
 if (-not [PW]::Buscar($h, 'exemplo')) { 'busca nao encontrada' }
@@ -138,6 +161,18 @@ if ($rec -ne [IntPtr]::Zero) {
   [PW]::Acionar($rec); Start-Sleep -Milliseconds 600
 } else { 'seta de recolher nao encontrada' }
 Start-Sleep 1
+# aba "Processos CPU" do cartao de sessoes: a busca "carga" filtra a lista de
+# processos pelo processo de carga (linha de comando legivel, sem expor
+# processos reais da maquina) e o clique na aba troca o cartao de conteudo
+if (-not [PW]::Buscar($h, 'carga')) { 'busca nao encontrada' }
+Start-Sleep 3
+$cart = [PW]::FilhoPrefixo($h, 'cartao_sessoes')
+if ($cart -ne [IntPtr]::Zero) {
+  [PW]::Clique($cart, 0x201, 0x202, 230, 20, 1)
+  Start-Sleep 2
+  [PW]::Shot($h, (Join-Path $Dest 'processos-cpu.png')); 'ok: aba de cpu'
+} else { 'cartao de sessoes nao encontrado' }
+Start-Sleep 1
 try { $g.CloseMainWindow() | Out-Null; if (-not $g.WaitForExit(4000)) { $g.Kill() } } catch {}
-foreach ($p in @($v, $o)) { try { if (-not $p.HasExited) { Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id)" | % { Stop-Process -Id $_.ProcessId -Force -EA 0 }; $p.Kill() } } catch {} }
+foreach ($p in @($v, $o, $cargaProc)) { try { if (-not $p.HasExited) { Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id)" | % { Stop-Process -Id $_.ProcessId -Force -EA 0 }; $p.Kill() } } catch {} }
 if ($cfgAntes -ne $null) { [IO.File]::WriteAllText($cfg, $cfgAntes) } else { Remove-Item $cfg -EA 0 }
