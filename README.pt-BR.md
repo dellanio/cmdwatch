@@ -240,10 +240,10 @@ gravados são o log local (`cmdwatch-log.jsonl`) e as preferências locais
 instala nada e não altera configuração do sistema — apagar o `cmdwatch.exe` (e,
 se quiser, a pasta `%APPDATA%\cmdwatch`) remove o programa por completo.
 
-**Situação:** o pedido de assinatura à SignPath Foundation foi enviado em
-2026-11-26 e está em análise. Enquanto o certificado não é emitido, os binários
-publicados seguem sem assinatura — instale pelo Scoop ou pelo winget para evitar
-o aviso do SmartScreen.
+**Situação:** o pedido de assinatura à SignPath Foundation foi preparado em
+2026-11-26 e aguarda submissão pelo dono do repositório. O certificado ainda
+não foi emitido, então os binários publicados seguem sem assinatura — instale
+pelo Scoop ou pelo winget para evitar o aviso do SmartScreen.
 
 ### Abrir o Painel Gráfico
 Dê **duplo clique** no `cmdwatch.exe` ou execute via terminal:

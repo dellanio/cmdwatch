@@ -237,10 +237,10 @@ and the local preferences (`%APPDATA%\cmdwatch\ui.cfg`). See also the
 and changes no system setting — deleting `cmdwatch.exe` (and, optionally, the
 `%APPDATA%\cmdwatch` folder) removes it completely.
 
-**Status:** the application to the SignPath Foundation was submitted on
-2026-11-26 and is under review. Until the certificate is issued, the released
-binaries are unsigned — install through Scoop or winget to avoid the
-SmartScreen prompt.
+**Status:** the application to the SignPath Foundation was prepared on
+2026-11-26 and is awaiting submission by the repository owner; the certificate
+has not been issued, so the released binaries are still unsigned — install
+through Scoop or winget to avoid the SmartScreen prompt.
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
