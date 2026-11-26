@@ -468,6 +468,35 @@ namespace CmdWatch
         }
 
         /// <summary>
+        /// Le SO o caminho do executavel de um processo.
+        ///
+        /// E a consulta mais barata que existe: abre o processo com
+        /// PROCESS_QUERY_LIMITED_INFORMATION (que o Windows concede mesmo para
+        /// processos ELEVADOS) e pergunta o caminho pela API oficial. Nao le
+        /// memoria do processo, entao nao trava nem incomoda.
+        ///
+        /// Os processos protegidos do sistema (svchost, lsass, csrss...) recusam
+        /// a consulta: para eles a funcao devolve false - e o caminho deles
+        /// precisa ser reconhecido pelo nome.
+        /// </summary>
+        public static bool TryGetProcessPath(int pid, out string path)
+        {
+            path = "";
+            IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                var sb = new StringBuilder(1024);
+                int len = 1024;
+                if (!QueryFullProcessImageNameW(h, 0, sb, ref len)) return false;
+                path = sb.ToString();
+                return path.Length > 0;
+            }
+            catch { return false; }
+            finally { try { CloseHandle(h); } catch { } }
+        }
+
+        /// <summary>
         /// Le o command line e o caminho do executavel a partir do PEB.
         /// Em vez de confiar em offsets fixos de RTL_USER_PROCESS_PARAMETERS (que mudam entre
         /// versoes do Windows), varre a regiao procurando a UNICODE_STRING cujo conteudo

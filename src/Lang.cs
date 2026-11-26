@@ -59,6 +59,19 @@ namespace CmdWatch
             { "v2CpuComando", new[] { "Comando", "Command" } },
             { "v2CpuCadeia", new[] { "Cadeia de ancestrais", "Ancestry tree" } },
             { "v2CpuElevado", new[] { "elevado", "elevated" } },
+            { "v2OcultarWin", new[] { "Esconder Windows", "Hide Windows" } },
+            { "v2OcultarWinTip", new[] {
+                "Esconde os processos do Windows: os que rodam de dentro de {0} e os serviços do sistema. Na lista fica só o que você instalou por fora.",
+                "Hides the Windows processes: the ones running from inside {0} and the system services. Only what you installed stays in the list." } },
+            { "v2OcultarWinAtivo", new[] {
+                "O Windows está escondido. Clique para voltar a mostrar todos os processos.",
+                "Windows is hidden. Click to show all the processes again." } },
+            { "v2OcultarWinAviso", new[] {
+                "{0} processos do Windows ocultos (de {1})",
+                "{0} Windows processes hidden (out of {1})" } },
+            { "v2MostrarWinAviso", new[] {
+                "{0} processos do Windows voltaram para a lista (de {1})",
+                "{0} Windows processes are back in the list (out of {1})" } },
             { "v2FilterAll", new[] { "Todas as sessões", "All sessions" } },
             { "v2FilterRun", new[] { "Em execução", "Running" } },
             { "v2FilterEnd", new[] { "Encerradas", "Ended" } },
@@ -265,7 +278,38 @@ namespace CmdWatch
         {
             string t = T(chave);
             try { return string.Format(CultureInfo.CurrentCulture, t, args); }
-            catch { return t; }
+            catch
+            {
+                // faltou argumento no texto: completa com "?" em vez de
+                // devolver o modelo cru (a mensagem continua fazendo sentido)
+                try
+                {
+                    int max = MaiorIndice(t);
+                    if (max < args.Length) return t;
+                    var a2 = new object[max + 1];
+                    for (int i = 0; i < a2.Length; i++) a2[i] = i < args.Length ? args[i] : "?";
+                    return string.Format(CultureInfo.CurrentCulture, t, a2);
+                }
+                catch { return t; }
+            }
+        }
+
+        /// <summary>Maior indice de placeholder ({0}, {1}...) do texto.</summary>
+        private static int MaiorIndice(string t)
+        {
+            int max = -1, i = 0;
+            while (i < t.Length)
+            {
+                int abre = t.IndexOf('{', i);
+                if (abre < 0) break;
+                int fecha = t.IndexOf('}', abre);
+                if (fecha < 0) break;
+                string dentro = t.Substring(abre + 1, fecha - abre - 1);
+                int n;
+                if (int.TryParse(dentro, out n) && n > max) max = n;
+                i = fecha + 1;
+            }
+            return max;
         }
 
         // ------------------------------------------------- persistencia

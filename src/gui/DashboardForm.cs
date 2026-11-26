@@ -62,6 +62,9 @@ namespace CmdWatch.Gui
         // remontada quando um dos dois muda
         private CpuSnapshot _cpuUltimoRetrato;
         private string _cpuUltimoFiltro = "";
+        private bool _cpuOcultoAnterior;
+        // quantas linhas a lista de CPU esta mostrando (publicado para a automacao)
+        private int _cpuLinhas;
         // usuario e integridade por processo: a leitura e cara (abre o token
         // do processo), entao cada processo e consultado uma vez so. A chave
         // leva a hora de inicio: o Windows recicla o PID e o dono muda.
@@ -72,6 +75,10 @@ namespace CmdWatch.Gui
         private SearchBox _busca, _buscaFluxo;
         private IconButton _btnPausa, _btnFiltro, _btnSessao, _btnCopiar, _btnLimpar, _btnFaixa, _btnIdioma;
         private IconButton _btnLimparSess;
+        // "Esconder Windows": na aba de CPU, tira da lista os processos do
+        // sistema e deixa so o que foi instalado por fora
+        private IconButton _btnOcultarWin;
+        private bool _ocultarWindows;
         // recolher/expandir cada cartao: botao de seta no cabecalho; chave salva em ui.cfg
         private readonly Dictionary<NeonPanel, IconButton> _chev = new Dictionary<NeonPanel, IconButton>();
         private readonly Dictionary<NeonPanel, string> _chave = new Dictionary<NeonPanel, string>();
@@ -102,6 +109,8 @@ namespace CmdWatch.Gui
         public DashboardForm(Options opts)
         {
             _opts = opts;
+            // a preferencia "esconder Windows" fica salva entre as sessoes
+            _ocultarWindows = Lang.GetCfg("ocultarWin") == "1";
             Text = Lang.T("v2Title");
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1000, 620);
@@ -207,6 +216,9 @@ namespace CmdWatch.Gui
             _btnFaixa = Botao(_pActivity, "", "", true, delegate { MenuFaixa(_btnFaixa); });
             _btnLimparSess = Botao(_pSessions, "\uE894", "", false, delegate { LimparSessoes(); });
             _btnLimparSess.Name = _btnLimparSess.Text = "btnLimparSessoes";
+            // aba "Processos CPU": esconde os processos do Windows
+            _btnOcultarWin = Botao(_pSessions, "\uE71C", "", false, delegate { AlternarOcultarWindows(); });
+            _btnOcultarWin.Name = _btnOcultarWin.Text = "btnOcultarWindows";
 
             // seta de recolher em todos os cartoes (nomes estaveis para a automacao de UI)
             _chave[_pSessions] = "sessoes"; _chave[_pWindows] = "janelas";
@@ -273,6 +285,10 @@ namespace CmdWatch.Gui
             _btnLimpar.Tip = Lang.T("v2Clear");
             _btnLimparSess.Label = Lang.T("v2ClearSess");
             _btnLimparSess.Tip = Lang.T("v2ClearSessTip");
+            _btnOcultarWin.Label = Lang.T("v2OcultarWin");
+            _btnOcultarWin.Active = _ocultarWindows;
+            _btnOcultarWin.Tip = _ocultarWindows ? Lang.T("v2OcultarWinAtivo")
+                                                 : Lang.F("v2OcultarWinTip", ClassificadorProcessos.DirWindows);
             foreach (KeyValuePair<NeonPanel, IconButton> c in _chev)
             {
                 bool rec = Recolhido(c.Key);
@@ -356,6 +372,10 @@ namespace CmdWatch.Gui
             _btnFiltro.Visible = !_abaCpu;          // o filtro e das sessoes
             int lsw = _btnLimparSess.PreferredW() + 4;
             _btnLimparSess.SetBounds(_btnFiltro.Left - 8 - lsw, hy, lsw, hb);
+            // "Esconder Windows" fica a esquerda do Limpar, so na aba de CPU
+            int osw = _btnOcultarWin.PreferredW() + 4;
+            _btnOcultarWin.SetBounds(_btnLimparSess.Left - 8 - osw, hy, osw, hb);
+            _btnOcultarWin.Visible = _abaCpu;
             int fx = _pStream.Width - dir;
             _btnLimpar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 6;
             _btnCopiar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 10;
@@ -607,6 +627,33 @@ namespace CmdWatch.Gui
         {
             string k;
             return _chave.TryGetValue(np, out k) && _recolhidos.Contains(k);
+        }
+
+        /// <summary>
+        /// "Esconder Windows" (aba Processos CPU): tira da lista os processos
+        /// do Windows - os que rodam de dentro de C:\Windows e os servicos
+        /// protegidos do sistema (svchost, lsass, csrss...) - e deixa na lista
+        /// so o que foi instalado por fora. Nao encerra nem mexe em processo
+        /// nenhum: e apenas o que a tabela mostra. A escolha fica salva.
+        /// </summary>
+        private void AlternarOcultarWindows()
+        {
+            _ocultarWindows = !_ocultarWindows;
+            Lang.SetCfg("ocultarWin", _ocultarWindows ? "1" : "0");
+            ApplyTexts();
+            LayoutDashboard();
+            OnSlowTick(null, EventArgs.Empty);
+
+            CpuSnapshot snap = CpuFeed.Atual;
+            if (snap != null && snap.Processos.Count > 0)
+            {
+                int total = snap.Processos.Count;
+                int fora = ClassificadorProcessos.SemWindows(snap.Processos).Count;
+                if (_ocultarWindows)
+                    ShowNotice(Lang.F("v2OcultarWinAviso", total - fora, total), Theme.Teal, 5);
+                else
+                    ShowNotice(Lang.F("v2MostrarWinAviso", fora, total), Theme.Teal, 5);
+            }
         }
 
         /// <summary>Seta do cabecalho: recolhe o cartao numa linha ou volta a abri-lo.</summary>
@@ -1302,10 +1349,6 @@ namespace CmdWatch.Gui
                                       .OrderByDescending(r => r.StartedAt).ToList();
                 _sessions.Invalidate();
                 _pSessions.TitleValue = _sessions.Rows.Count.ToString();
-                string ts = "cartao_sessoes|linhas=" + _sessions.Rows.Count + "|" +   // lido pela automacao de UI
-                            string.Join(",", _sessions.Rows.Take(12).Select(r => r.Script));
-                if (_pSessions.Text != ts) _pSessions.Text = ts;
-                _pSessions.Invalidate();
 
                 // a tabela de janelas: duracao correndo e estado atual
                 var winRows = new List<WindowRow>();
@@ -1323,25 +1366,33 @@ namespace CmdWatch.Gui
 
                 // aba "Processos CPU": o retrato mais recente do amostrador
                 CpuSnapshot snap = CpuFeed.Atual;
-                int totalProcessos = 0;
+                int visiveisProcessos = 0;
                 if (snap != null && snap.Processos.Count > 0)
                 {
-                    totalProcessos = snap.Processos.Count;
                     _cpuTotal = snap.UsoTotal;
+                    // o filtro "esconder Windows" roda antes do filtro de texto:
+                    // a lista e remontada so com o que sobra
+                    List<CpuRow> visiveis = snap.Processos;
+                    if (_ocultarWindows) visiveis = ClassificadorProcessos.SemWindows(snap.Processos);
+                    visiveisProcessos = visiveis.Count;
                     // a lista so e remontada quando o retrato muda (o amostrador
                     // publica a cada 1,5 s) ou quando o filtro muda - e apenas
                     // quando a aba esta aberta
                     bool retratoNovo = !ReferenceEquals(snap, _cpuUltimoRetrato);
                     bool filtroNovo = _cpuUltimoFiltro != q;
-                    if (_abaCpu && (retratoNovo || filtroNovo))
+                    bool ocultoNovo = _cpuOcultoAnterior != _ocultarWindows;
+                    if (_abaCpu && (retratoNovo || filtroNovo || ocultoNovo))
                     {
                         _cpuUltimoRetrato = snap;
                         _cpuUltimoFiltro = q;
-                        _cpu.Tabela.Filtrar(snap.Processos, q);
+                        _cpuOcultoAnterior = _ocultarWindows;
+
+                        _cpu.Tabela.Filtrar(visiveis, q);
+                        _cpuLinhas = _cpu.Tabela.Rows.Count;
 
                         // com filtro ativo, um processo que saiu da lista nao pode
                         // continuar selecionado (o detalhe mostraria algo invisivel)
-                        if (_cpu.Tabela.Filtro.Length > 0 && _cpu.Tabela.SelecionadoPid >= 0)
+                        if ((_cpu.Tabela.Filtro.Length > 0 || _ocultarWindows) && _cpu.Tabela.SelecionadoPid >= 0)
                         {
                             bool visivel = false;
                             foreach (CpuRow r in _cpu.Tabela.Rows)
@@ -1385,8 +1436,16 @@ namespace CmdWatch.Gui
                         else _cpu.Detalhe.Selecionar(null, snap.Processos);
                     }
                 }
-                _pSessions.TabValues = new[] { _sessions.Rows.Count.ToString(), totalProcessos.ToString() };
+                _pSessions.TabValues = new[] { _sessions.Rows.Count.ToString(), visiveisProcessos.ToString() };
                 _pSessions.Invalidate();
+
+                // estado do cartao publicado na janela (lido pela automacao de UI):
+                // quantas sessoes, quantos processos e quantas linhas na lista
+                string ts = "cartao_sessoes|linhas=" + _sessions.Rows.Count + "|" +
+                            string.Join(",", _sessions.Rows.Take(12).Select(r => r.Script)) +
+                            "|cpu=" + visiveisProcessos + "|cpu_linhas=" + _cpuLinhas +
+                            "|cpu_nomes=" + string.Join(",", _cpu.Tabela.Rows.Take(10).Select(r => r.Name));
+                if (_pSessions.Text != ts) _pSessions.Text = ts;
 
                 // memoria da maquina em tempo real (uma chamada barata)
                 MemInfo mem;

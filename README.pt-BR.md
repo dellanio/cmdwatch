@@ -55,6 +55,14 @@
         <img src="docs/processos-cpu.png" alt="Aba Processos CPU" width="820" />
       </td>
     </tr>
+    <tr>
+      <td align="center" colspan="2"><b>"Esconder Windows": na lista fica só o que você instalou por fora</b></td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2">
+        <img src="docs/ocultar-windows.png" alt="Esconder Windows" width="820" />
+      </td>
+    </tr>
   </table>
 </div>
 
@@ -98,6 +106,7 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
 - 🔒 **Máscara Automática de Segredos:** Sanitiza tokens, senhas, chaves de API, cabeçalhos `Bearer` e credenciais AWS antes de gravar em disco ou renderizar na tela.
 - 🛑 **Encerramento Seguro contra Colisão de PID:** Permite encerrar scripts e árvores de processos pela UI com verificação rigorosa de data/hora de criação do PID (`GetProcessTimes`), impedindo matar processos reciclados.
 - 🖥️ **Inspetor de CPU e Processos ao Vivo:** uma segunda aba dentro do cartão de sessões lista todos os processos da máquina com consumo de CPU, memória privada, threads e hora de início, ao lado de um painel de detalhe com dono, sessão, linha de comando e cadeia de ancestrais. Os números saem do retrato do kernel, sem custo extra de leitura.
+- 🙈 **Esconder os processos do Windows:** o botão "Esconder Windows" tira da lista tudo que é do sistema (`C:\Windows` e os serviços protegidos) e deixa só o que você instalou por fora — 635 processos viram 356 numa máquina comum, em ~15 ms na primeira vez e nada depois.
 - 📐 **Painel ajustável:** as colunas das tabelas (nas duas abas) e a divisória entre a lista e o detalhe podem ser redimensionadas arrastando com o mouse.
 - 📦 **Instala pelo Scoop e pelo winget:** os dois gerenciadores entregam o executável **sem** o aviso do SmartScreen e sem pedir instalação — o `cmdwatch` fica no `PATH`.
 - 🎨 **Interface Neon Customizada:** Construída em GDI+ puro sem frameworks pesados, com suporte a tema escuro/claro, busca em tempo real, ordenação de colunas e minimização para a Área de Notificação (Tray).
@@ -280,6 +289,36 @@ o **início** e há quanto tempo está vivo, a **CPU instantânea e a média** d
 - **Na aba "Processos CPU"**, a divisória entre a lista (esquerda) e o detalhe (direita) também
   é arrastável: o detalhe ganha ou perde largura conforme você puxa.
 
+### 🔍 Esconder os processos do Windows
+
+O botão **Esconder Windows**, no cabeçalho do cartão (só aparece na aba "Processos CPU"), tira da
+lista os processos do sistema e deixa só o que você instalou por fora. Medido nesta máquina: a
+lista cai de **635 para 356 processos** — o `svchost.exe` (95 cópias), o `explorer.exe`, o
+`lsass.exe` e o `cmd.exe` somem, e o que fica é o que você instalou.
+
+![Botão Esconder Windows ligado](docs/ocultar-windows.png)
+
+*A captura: com o botão ligado, o `cmd.exe` (que é do Windows) some da lista e o `node.exe` — que
+roda fora de `C:\Windows` — continua lá.*
+
+A regra é o caminho do executável:
+
+- **dentro de `C:\Windows`** → é do Windows (`svchost.exe`, `explorer.exe`, `cmd.exe`,
+  `powershell.exe`…);
+- **serviço protegido do sistema** (os que não deixam ler o caminho: `svchost`, `lsass`, `csrss`,
+  `Registry`, `Secure System`…) → também do Windows;
+- **todo o resto continua visível**: programas em `C:\Program Files`, na sua pasta de usuário, no
+  Scoop, em `D:\ferramentas`, as apps da Microsoft Store (pasta `WindowsApps`) e os serviços de
+  fabricante (NVIDIA, Dell, HP, NordVPN, Tailscale…) — você instalou esses, então eles ficam.
+
+O caminho de um processo não muda enquanto ele viver, então a consulta é feita uma vez por
+(pid, hora de início) e fica em cache: abrir ~600 processos custa **~15 ms**, só na primeira vez
+(medido: 19 ms na primeira passagem, 0 ms nas seguintes).
+
+Nada é encerrado — o botão só muda o que a lista mostra. O contador da aba mostra quantos
+processos estão visíveis, e a escolha fica salva no `ui.cfg`: da próxima vez que você abrir o
+painel, o Windows continua escondido (ou como você deixou).
+
 ### Como os números são calculados
 
 O retrato do kernel (`NtQuerySystemInformation`) já devolve, no mesmo buffer e **sem custo extra de
@@ -298,7 +337,7 @@ motor de eventos) e a diferença do tempo de CPU vira o percentual:
 - O percentual é **do total da máquina**, não de um núcleo: 6% significa 6% dos 16 núcleos somados.
 - **Diretório de trabalho e variáveis de ambiente não são lidos**: exigem `PROCESS_VM_READ` e falham em processo elevado.
 - **Usuário e integridade** vêm do token do processo, lidos uma vez por processo (o token não muda enquanto ele viver); processos protegidos podem não responder.
-- A lista mostra **todos** os processos da máquina (mais de 500 em uso comum); o custo do retrato é de poucos milissegundos.
+- A lista mostra **todos** os processos da máquina (mais de 500 em uso comum) — ou só os que você instalou, com o botão **Esconder Windows**; o custo do retrato é de poucos milissegundos.
 
 ---
 

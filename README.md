@@ -55,6 +55,14 @@
         <img src="docs/processos-cpu.png" alt="CPU Processes Tab" width="820" />
       </td>
     </tr>
+    <tr>
+      <td align="center" colspan="2"><b>"Hide Windows": only what you installed stays in the list</b></td>
+    </tr>
+    <tr>
+      <td align="center" colspan="2">
+        <img src="docs/ocultar-windows.png" alt="Hide Windows" width="820" />
+      </td>
+    </tr>
   </table>
 </div>
 
@@ -98,6 +106,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 - 🔒 **Active Secret Masking:** Automatically redacts tokens, passwords, API keys, `Authorization: Bearer` headers, and AWS credentials before saving to logs or rendering on screen.
 - 🛑 **Safe Process Tree Termination (PID Reuse Guard):** Safely terminates runaway scripts and child process trees directly from the UI, with strict creation timestamp verification (`GetProcessTimes`) preventing accidental termination of recycled PIDs.
 - 🖥️ **Live CPU & Process Inspector:** a second tab inside the sessions card lists every process on the machine with its CPU share, private memory, thread count and start time, next to a detail pane with the owner, session, command line and ancestry chain. The numbers come from the kernel snapshot, at no extra read cost.
+- 🙈 **Hide the Windows processes:** the "Hide Windows" button takes everything from the system out of the list (`C:\Windows` and the protected services) and leaves only what you installed yourself — 635 processes become 356 on a normal machine, in ~15 ms the first time and nothing after that.
 - 📐 **Adjustable panel:** the table columns (in both tabs) and the divider between the list and the detail can be resized by dragging with the mouse.
 - 📦 **Installs through Scoop and winget:** both package managers deliver the executable **without** the SmartScreen warning and without an installer — `cmdwatch` ends up on the `PATH`.
 - 🎨 **Custom Neon UI:** Lightweight GDI+ rendering with Dark and Light themes, real-time search, sortable columns, and background minimization to the Windows System Tray.
@@ -280,6 +289,36 @@ pill when the process runs with high integrity, the **user** who owns it, the **
 - **In the "CPU Processes" tab**, the divider between the list (left) and the detail (right) is
   draggable too: the detail gains or loses width as you pull.
 
+### 🔍 Hiding the Windows processes
+
+The **Hide Windows** button, in the card header (it only shows up in the "CPU Processes" tab),
+takes the system processes out of the list and leaves only what you installed yourself. Measured
+on this machine: the list drops from **635 to 356 processes** — the `svchost.exe` (95 copies),
+`explorer.exe`, `lsass.exe` and `cmd.exe` go away, and what is left is what you installed.
+
+![Hide Windows button on](docs/ocultar-windows.png)
+
+*The capture: with the button on, the `cmd.exe` (which is Windows) leaves the list and the
+`node.exe` — running outside `C:\Windows` — stays.*
+
+The rule is the executable path:
+
+- **inside `C:\Windows`** → it is Windows (`svchost.exe`, `explorer.exe`, `cmd.exe`,
+  `powershell.exe`…);
+- **protected system service** (the ones that refuse to give up their path: `svchost`, `lsass`,
+  `csrss`, `Registry`, `Secure System`…) → also Windows;
+- **everything else stays visible**: programs in `C:\Program Files`, in your user folder, in Scoop,
+  in `D:\ferramentas`, the Microsoft Store apps (`WindowsApps` folder) and the vendor services
+  (NVIDIA, Dell, HP, NordVPN, Tailscale…) — you installed those, so they stay.
+
+A process path does not change while it lives, so the query is done once per (pid, start time)
+and cached: opening ~600 processes costs **~15 ms**, only the first time (measured: 19 ms on the
+first pass, 0 ms on the next ones).
+
+Nothing is terminated — the button only changes what the list shows. The tab counter tells how
+many processes are visible, and the choice is saved in `ui.cfg`: next time you open the panel,
+Windows stays hidden (or the way you left it).
+
 ### How the numbers are computed
 
 The kernel snapshot (`NtQuerySystemInformation`) already returns, in the same buffer and at **no
@@ -298,7 +337,7 @@ disturb the event engine) and turns the difference in CPU time into a percentage
 - The percentage is **of the whole machine**, not of a single core: 6% means 6% of all 16 cores together.
 - **Working directory and environment variables are not read**: they require `PROCESS_VM_READ` and fail on elevated processes.
 - **User and integrity level** come from the process token, read once per process (the token does not change while it lives); protected processes may not answer.
-- The list shows **every** process on the machine (500+ in normal use); the snapshot costs a few milliseconds.
+- The list shows **every** process on the machine (500+ in normal use) — or only the ones you installed, with the **Hide Windows** button; the snapshot costs a few milliseconds.
 
 ---
 

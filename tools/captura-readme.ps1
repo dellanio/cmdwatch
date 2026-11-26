@@ -102,9 +102,17 @@ Set-Content (Join-Path $demo 'exemplo-sincroniza.cmd') "@echo off`r`necho sincro
 $carga = Join-Path (Resolve-Path "$PSScriptRoot\..").Path '.build\carga'
 New-Item -ItemType Directory -Force $carga | Out-Null
 Set-Content (Join-Path $carga 'carga-cpu.cmd') "@echo off`r`ntitle carga de cpu`r`n:loop`r`nset /a n+=1`r`ngoto loop" -Encoding ASCII
+# carga fora do Windows (node): e o processo que SOBREVIVE ao botao
+# "Esconder Windows" - o cmd.exe de cima e do Windows e some da lista
+$nodeDemo = $null
+$nodeExe = (Get-Command node.exe -EA 0).Source
+if ($nodeExe) {
+  Set-Content (Join-Path $carga 'carga-cpu.js') "const t = Date.now(); while (Date.now() - t < 600000) { Math.sqrt(Date.now()); }" -Encoding ASCII
+  $nodeDemo = Start-Process $nodeExe -ArgumentList "`"$(Join-Path $carga 'carga-cpu.js')`"" -WindowStyle Hidden -PassThru
+}
 # captura em PT-BR com os cartoes abertos: guarda o ui.cfg e o ajusta (restaurado no final)
 $cfg = Join-Path $env:APPDATA 'cmdwatch\ui.cfg'; $cfgAntes = if (Test-Path $cfg) { [IO.File]::ReadAllText($cfg) } else { $null }
-$cfgNovo = @(@(if ($cfgAntes -ne $null) { $cfgAntes -split "`r?`n" }) | Where-Object { $_ -and $_ -notmatch '^(recolhidos|lang)=' }) + 'lang=pt-br'; New-Item -ItemType Directory -Force (Split-Path $cfg) | Out-Null; [IO.File]::WriteAllText($cfg, ($cfgNovo -join "`r`n"))
+$cfgNovo = @(@(if ($cfgAntes -ne $null) { $cfgAntes -split "`r?`n" }) | Where-Object { $_ -and $_ -notmatch '^(recolhidos|lang|ocultarWin)=' }) + @('lang=pt-br', 'ocultarWin=0'); New-Item -ItemType Directory -Force (Split-Path $cfg) | Out-Null; [IO.File]::WriteAllText($cfg, ($cfgNovo -join "`r`n"))
 $g = Start-Process $Exe -ArgumentList 'gui', '--quiet' -PassThru
 for ($i = 0; $i -lt 40 -and $g.MainWindowHandle -eq 0; $i++) { Start-Sleep -Milliseconds 250; $g.Refresh() }
 Start-Sleep 3
@@ -173,6 +181,15 @@ if ($cart -ne [IntPtr]::Zero) {
   [PW]::Shot($h, (Join-Path $Dest 'processos-cpu.png')); 'ok: aba de cpu'
 } else { 'cartao de sessoes nao encontrado' }
 Start-Sleep 1
+# botao "Esconder Windows": a lista perde o cmd.exe (que e do Windows) e
+# mantem o processo de carga que roda fora da pasta do Windows
+$bWin = [PW]::Filho($h, 'btnOcultarWindows')
+if ($bWin -ne [IntPtr]::Zero) {
+  [PW]::Acionar($bWin); Start-Sleep 3
+  [PW]::Shot($h, (Join-Path $Dest 'ocultar-windows.png')); 'ok: esconder windows'
+  [PW]::Acionar($bWin); Start-Sleep 1
+} else { 'botao de esconder windows nao encontrado' }
+Start-Sleep 1
 try { $g.CloseMainWindow() | Out-Null; if (-not $g.WaitForExit(4000)) { $g.Kill() } } catch {}
-foreach ($p in @($v, $o, $cargaProc)) { try { if (-not $p.HasExited) { Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id)" | % { Stop-Process -Id $_.ProcessId -Force -EA 0 }; $p.Kill() } } catch {} }
+foreach ($p in @($v, $o, $cargaProc, $nodeDemo)) { try { if ($p -and -not $p.HasExited) { Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.Id)" | % { Stop-Process -Id $_.ProcessId -Force -EA 0 }; $p.Kill() } } catch {} }
 if ($cfgAntes -ne $null) { [IO.File]::WriteAllText($cfg, $cfgAntes) } else { Remove-Item $cfg -EA 0 }
