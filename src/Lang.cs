@@ -217,6 +217,11 @@ namespace CmdWatch
             { "engineInstant",    new[] { "evento instantaneo", "instant event" } },
             { "filterNone",       new[] { "(todos)",           "(all)" } },
             { "logOff",           new[] { "(desativado)",      "(disabled)" } },
+            { "bannerAviso",      new[] { "aviso",             "warning" } },
+            { "logMovido",        new[] { "log movido para {0}: o diretório atual não permite escrita",
+                                          "log moved to {0}: the current directory is not writable" } },
+            { "logFalhou",        new[] { "não foi possível abrir o log: {0}",
+                                          "could not open the log: {0}" } },
 
             // -------------------------------------------- eventos de janela
             { "bannerWindows",    new[] { "janelas",  "windows" } },

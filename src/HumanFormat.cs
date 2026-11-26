@@ -33,6 +33,8 @@ namespace CmdWatch
         public bool IsGui;
         /// <summary>True quando o observador de janelas esta ligado.</summary>
         public bool Janelas;
+        /// <summary>Aviso sobre o log (mudou de lugar ou nao abriu). Vazio quando tudo esta em ordem.</summary>
+        public string Aviso = "";
     }
 
     /// <summary>
@@ -92,6 +94,8 @@ namespace CmdWatch
             if (info.Janelas)
                 lines.Add(new HumanLine(Row(Lang.T("bannerWindows"), Lang.T("bannerWindowsOn")), HumanRole.Body));
             lines.Add(new HumanLine(info.IsGui ? Lang.T("bannerCaptureGui") : Lang.T("bannerCaptureCli"), HumanRole.Body));
+            if (info.Aviso.Length > 0)
+                lines.Add(new HumanLine(Row(Lang.T("bannerAviso"), info.Aviso), HumanRole.Body));
             return lines;
         }
 

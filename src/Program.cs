@@ -12,7 +12,7 @@ namespace CmdWatch
 {
     internal static class Program
     {
-        internal const string Version = "1.3.0";
+        internal const string Version = "1.3.1";
         private static ConsoleColor _lastColor = ConsoleColor.Gray;
 
         [STAThread]
@@ -111,16 +111,13 @@ opcoes do trace:
             StreamWriter log = null;
             object logLock = new object();
 
+            LogOpen ab = new LogOpen();
             if (!o.Quiet && o.LogPath != null)
             {
-                try
-                {
-                    log = new StreamWriter(o.LogPath, true, new UTF8Encoding(false)) { AutoFlush = true };
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine("[!] nao foi possivel abrir o log: " + ex.Message);
-                }
+                // o log pode mudar de lugar (pasta atual sem escrita) ou falhar:
+                // o aviso vai para o cabecalho, nao some em silencio
+                ab = LogFile.Abrir(o.LogPath);
+                log = ab.Writer;
             }
 
             watcher.OnEvent = ev =>
@@ -138,7 +135,8 @@ opcoes do trace:
             info.Engine = engine;
             info.IntervalMs = o.Interval;
             info.Filter = o.Filter;
-            info.LogPath = (log == null) ? "" : o.LogPath;
+            info.LogPath = (log == null) ? "" : ab.Caminho;
+            info.Aviso = ab.Aviso();
             info.Janelas = !o.NoWindows;
             foreach (HumanLine hl in HumanFormat.Banner(info))
                 Console.WriteLine(hl.Text);
@@ -531,7 +529,7 @@ opcoes do trace:
 
     internal sealed class Options
     {
-        public string LogPath = "cmdwatch-log.jsonl";
+        public string LogPath = LogFile.NomePadrao;
         public int Interval = 500;
         public int FastInterval = 50;
         public string Engine = "auto";

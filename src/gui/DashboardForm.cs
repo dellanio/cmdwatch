@@ -22,6 +22,7 @@ namespace CmdWatch.Gui
         private readonly Watcher _watcher = new Watcher();
         private IEngine _engine;
         private StreamWriter _log;
+        private string _logPath = "";
         private string _engineName = "polling";
         private bool _paused;
         private bool _inTray;
@@ -632,7 +633,7 @@ namespace CmdWatch.Gui
         {
             string msg = Lang.F("v2SettingsMsg", _engineName, _opts.Interval,
                 _janelas != null ? Lang.T("v2On") : Lang.T("v2Off"),
-                _opts.LogPath.Length > 0 ? _opts.LogPath : Lang.T("v2NoLog"),
+                _logPath.Length > 0 ? _logPath : Lang.T("v2NoLog"),
                 _opts.Filter.Length > 0 ? _opts.Filter : "*");
             NeonDialog.Confirm(this, Lang.T("v2Settings"), msg, "OK", "", Theme.Teal);
         }
@@ -703,14 +704,14 @@ namespace CmdWatch.Gui
             }
             _engine.Start(p => _watcher.OnProcessStart(p), pid => _watcher.OnProcessExit(pid));
 
+            LogOpen ab = new LogOpen();
             if (_opts.LogPath.Length > 0)
             {
-                try
-                {
-                    _log = new StreamWriter(_opts.LogPath, true, Encoding.UTF8);
-                    _log.AutoFlush = true;
-                }
-                catch { _log = null; }
+                // o log pode mudar de lugar (pasta atual sem escrita) ou falhar:
+                // o aviso vai para o cabecalho, nao some em silencio
+                ab = LogFile.Abrir(_opts.LogPath);
+                _log = ab.Writer;
+                _logPath = ab.Caminho;
             }
 
             BuildTray();
@@ -721,7 +722,8 @@ namespace CmdWatch.Gui
             info.Engine = _engineName;
             info.IntervalMs = _opts.Interval;
             info.Filter = _opts.Filter;
-            info.LogPath = _opts.LogPath;
+            info.LogPath = _logPath;
+            info.Aviso = ab.Aviso();
             info.IsGui = true;
             info.Janelas = _janelas != null;
             AppendBanner(info);
@@ -841,8 +843,8 @@ namespace CmdWatch.Gui
         {
             try
             {
-                if (_opts.LogPath.Length > 0 && File.Exists(_opts.LogPath))
-                    Process.Start("notepad.exe", "\"" + _opts.LogPath + "\"");
+                if (_logPath.Length > 0 && File.Exists(_logPath))
+                    Process.Start("notepad.exe", "\"" + _logPath + "\"");
                 else if (_tray != null)
                     _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayNoLog"), ToolTipIcon.Info);
             }
