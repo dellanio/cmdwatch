@@ -1,0 +1,21 @@
+{
+    "version": "1.3.1",
+    "description": "Monitor de sessões CMD em tempo real: quem chamou o script, cada comando executado, as janelas abertas e o consumo de CPU e memória de cada processo da máquina.",
+    "homepage": "https://github.com/dellanio/cmdwatch",
+    "license": "MIT",
+    "url": "https://github.com/dellanio/cmdwatch/releases/download/v1.3.1/cmdwatch.exe",
+    "hash": "80E44C25219C320DABF84A4D40956821EC53785FB3DF1B73AC279C1CF4B1548D",
+    "bin": "cmdwatch.exe",
+    "checkver": {
+        "url": "https://github.com/dellanio/cmdwatch/releases/latest",
+        "regex": "v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)"
+    },
+    "autoupdate": {
+        "url": "https://github.com/dellanio/cmdwatch/releases/download/v$version/cmdwatch.exe",
+        "hash": "80E44C25219C320DABF84A4D40956821EC53785FB3DF1B73AC279C1CF4B1548D"
+    },
+    "notes": [
+        "Painel gráfico com sessões CMD e retrato vivo da máquina (CPU e memória).",
+        "Acompanhe scripts .cmd/.bat: autor, comandos executados e janelas abertas."
+    ]
+}

@@ -99,6 +99,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 - 🛑 **Safe Process Tree Termination (PID Reuse Guard):** Safely terminates runaway scripts and child process trees directly from the UI, with strict creation timestamp verification (`GetProcessTimes`) preventing accidental termination of recycled PIDs.
 - 🖥️ **Live CPU & Process Inspector:** a second tab inside the sessions card lists every process on the machine with its CPU share, private memory, thread count and start time, next to a detail pane with the owner, session, command line and ancestry chain. The numbers come from the kernel snapshot, at no extra read cost.
 - 📐 **Adjustable panel:** the table columns (in both tabs) and the divider between the list and the detail can be resized by dragging with the mouse.
+- 📦 **Installs through Scoop and winget:** both package managers deliver the executable **without** the SmartScreen warning and without an installer — `cmdwatch` ends up on the `PATH`.
 - 🎨 **Custom Neon UI:** Lightweight GDI+ rendering with Dark and Light themes, real-time search, sortable columns, and background minimization to the Windows System Tray.
 
 ---
@@ -157,7 +158,45 @@ flowchart TD
 
 Download the pre-compiled binary:
 
-**[⬇ Download cmdwatch v1.3.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Download cmdwatch v1.3.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+
+### Install with Scoop (recommended on Windows)
+
+Scoop installs the file **without** the Mark-of-the-Web flag: Windows shows
+**no SmartScreen warning** ("Windows protected your PC") and `cmdwatch` ends up
+on the `PATH`, ready to call from any terminal.
+
+```powershell
+scoop bucket add dellanio https://github.com/dellanio/scoop-bucket
+scoop install cmdwatch
+cmdwatch
+```
+
+### Install with winget (Windows Package Manager)
+
+```powershell
+winget install dellanio.cmdwatch
+```
+
+> The submission to the official winget repository is **under review** by the
+> Microsoft maintainers ([PR #489709](https://github.com/microsoft/winget-pkgs/pull/489709)).
+> Once it is approved, the command above works out of the box.
+
+winget also installs **without** the SmartScreen warning. The manifest is
+generated and validated on every release by `tools/gerar-winget.ps1`.
+
+### Why the SmartScreen warning shows up on a direct download
+
+Downloading the `.exe` with a browser marks the file with the *Mark-of-the-Web*,
+and Windows shows the blue "Windows protected your PC" warning until the file
+gains reputation. **Installing through Scoop or winget has no such problem**:
+the file reaches the program folder without the mark and Windows runs it
+directly.
+
+The other way to remove the warning is to **sign the executable** (Authenticode
+with a certificate from a trusted CA). The cmdwatch is **not signed yet** — but
+it does not need to be to install without a warning through the two package
+managers above.
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
@@ -288,6 +327,39 @@ To measure it again:
 ```powershell
 powershell -File .\tools\medir-consumo.ps1 -Exe .\out\cmdwatch.exe -Segundos 60
 ```
+
+---
+
+## 🐛 v1.3.1 fix (the log that vanished silently)
+
+The default log path (`cmdwatch-log.jsonl`) is **relative**: it lands next to
+the script the user runs. That works while the current directory is writable —
+but not when it is not:
+
+| Situation | Before | Now |
+|---|---|---|
+| Current directory writable | log next to the script | **same** |
+| Current directory not writable (installer, MSIX package, network share) | the log **did not exist**, with no warning at all | log goes to `%LOCALAPPDATA%\cmdwatch` and the header **says** where it ended up |
+| Absolute path not allowed (`--log C:\...`) | nothing, no warning | the log stays off, but the **reason shows up** |
+| Path shown in the header | the *requested* path | the **real** path (the "open log" button and the settings screen follow the same one) |
+
+An absolute path is the user's explicit intent, so it is respected: cmdwatch
+does not redirect a `--log C:\...` somewhere else — it opens it, or explains why
+it could not.
+
+The warning shows up in the header (the same block in the terminal and in the
+panel):
+
+```
+    log        : C:\Users\you\AppData\Local\cmdwatch\cmdwatch-log.jsonl
+    filtro     : (todos)
+capturando ... (Ctrl+C to exit)
+    aviso      : log movido para C:\Users\you\AppData\Local\cmdwatch\cmdwatch-log.jsonl: o diretório atual não permite escrita
+```
+
+Smaller detail that also changed: the log written by the panel is now stored
+**without a BOM** (the terminal one already was) — JSONL with a BOM breaks
+strict readers such as `jq`.
 
 ---
 
