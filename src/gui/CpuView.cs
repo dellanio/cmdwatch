@@ -118,7 +118,7 @@ namespace CmdWatch.Gui
                     new Rectangle(xs[4], y, xs[5] - xs[4] - 8, RowHeight), Theme.Dim, CellF);
                 TextRenderer.DrawText(g, r.StartedAt == DateTime.MinValue ? "—" : r.StartedAt.ToString("HH:mm:ss"),
                     Theme.MonoSmall, new Rectangle(xs[5], y, xs[6] - xs[5] - 8, RowHeight), Theme.Dim, CellF);
-                TextRenderer.DrawText(g, r.CmdLine, Theme.MonoSmall,
+                TextRenderer.DrawText(g, Mascara.Aplicar(r.CmdLine), Theme.MonoSmall,
                     new Rectangle(xs[6], y, Math.Max(10, xs[7] - xs[6] - 8), RowHeight), Theme.Dim, CellF);
             }
             Rolagem(g);
@@ -322,7 +322,7 @@ namespace CmdWatch.Gui
             y += 4;
             TextRenderer.DrawText(g, Lang.T("v2CpuComando"), Theme.UiSmall, new Rectangle(x, y, w, 14), Theme.Dim, L);
             y += 16;
-            y = TextoLongo(g, _sel.CmdLine, x, y, w, Theme.MonoSmall, Theme.Text);
+            y = TextoLongo(g, Mascara.Aplicar(_sel.CmdLine), x, y, w, Theme.MonoSmall, Theme.Text);
 
             // cadeia de ancestrais
             if (_cadeia.Count > 0)

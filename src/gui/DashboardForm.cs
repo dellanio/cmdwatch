@@ -1309,6 +1309,16 @@ namespace CmdWatch.Gui
                     _cpuTotal = snap.UsoTotal;
                     _cpu.Tabela.Filtrar(snap.Processos, q);
 
+                    // com filtro ativo, um processo que saiu da lista nao pode
+                    // continuar selecionado (o detalhe mostraria algo invisivel)
+                    if (_cpu.Tabela.Filtro.Length > 0 && _cpu.Tabela.SelecionadoPid >= 0)
+                    {
+                        bool visivel = false;
+                        foreach (CpuRow r in _cpu.Tabela.Rows)
+                            if (r.Pid == _cpu.Tabela.SelecionadoPid) { visivel = true; break; }
+                        if (!visivel) _cpu.Tabela.Selecionar(-1);
+                    }
+
                     // sem escolha, o topo da lista fica selecionado (o processo
                     // que mais esta usando a CPU)
                     if (_cpu.Tabela.SelecionadoPid < 0 && _cpu.Tabela.Rows.Count > 0)
