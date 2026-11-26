@@ -156,7 +156,7 @@ flowchart TD
 
 Baixe o executável pronto para uso:
 
-**[⬇ Baixar cmdwatch v1.1.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Baixar cmdwatch v1.2.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Abrir o Painel Gráfico
 Dê **duplo clique** no `cmdwatch.exe` ou execute via terminal:

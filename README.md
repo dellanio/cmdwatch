@@ -156,7 +156,7 @@ flowchart TD
 
 Download the pre-compiled binary:
 
-**[⬇ Download cmdwatch v1.1.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Download cmdwatch v1.2.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
