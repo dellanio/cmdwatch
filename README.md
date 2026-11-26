@@ -89,7 +89,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 
 ## 🚀 Key Features
 
-- 📦 **Single Portable Executable:** ~580 KB compiled with C# (.NET Framework 4.8, already pre-installed on Windows). Zero installer, zero external DLLs.
+- 📦 **Single Portable Executable:** ~605 KB compiled with C# (.NET Framework 4.8, already pre-installed on Windows). Zero installer, zero external DLLs.
 - 🛡️ **No Administrator Rights Required:** Inspects processes, parameters, and PEB memory (`NtQueryInformationProcess`) without requiring elevation.
 - 🔍 **Accurate Console Author Resolution (ConPTY / Cascadia):** In Windows Terminal, seamlessly correlates `CASCADIA_HOSTING_WINDOW_CLASS` host windows with their underlying `PseudoConsoleWindow`, identifying the real author rather than `WindowsTerminal.exe`.
 - ⚡ **Dual Capture Engines (Polling & Kernel ETW):**
@@ -98,6 +98,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 - 🔒 **Active Secret Masking:** Automatically redacts tokens, passwords, API keys, `Authorization: Bearer` headers, and AWS credentials before saving to logs or rendering on screen.
 - 🛑 **Safe Process Tree Termination (PID Reuse Guard):** Safely terminates runaway scripts and child process trees directly from the UI, with strict creation timestamp verification (`GetProcessTimes`) preventing accidental termination of recycled PIDs.
 - 🖥️ **Live CPU & Process Inspector:** a second tab inside the sessions card lists every process on the machine with its CPU share, private memory, thread count and start time, next to a detail pane with the owner, session, command line and ancestry chain. The numbers come from the kernel snapshot, at no extra read cost.
+- 📐 **Adjustable panel:** the table columns (in both tabs) and the divider between the list and the detail can be resized by dragging with the mouse.
 - 🎨 **Custom Neon UI:** Lightweight GDI+ rendering with Dark and Light themes, real-time search, sortable columns, and background minimization to the Windows System Tray.
 
 ---
@@ -156,7 +157,7 @@ flowchart TD
 
 Download the pre-compiled binary:
 
-**[⬇ Download cmdwatch v1.2.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Download cmdwatch v1.3.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Launching the Graphical Dashboard
 Simply **double-click** `cmdwatch.exe` or execute from any terminal:
@@ -208,7 +209,8 @@ cmdwatch.exe trace script.cmd
 
 The **CMD Sessions** card became a two-tab card: **CMD Sessions** (unchanged behavior) and
 **CPU Processes**, which shows a live picture of the machine. The KPI strip gains a fifth card,
-**CPU usage**, with the machine-wide total in real time.
+**CPU usage**, with the machine-wide total in real time, and a sixth one, **Memory usage**, with
+the physical memory in use in real time.
 
 ![CPU Processes tab](docs/processos-cpu.png)
 
@@ -232,6 +234,13 @@ pill when the process runs with high integrity, the **user** who owns it, the **
 **threads**, the **executable**, the **command line** wrapped over several lines, and the
 **ancestry chain** (who called whom).
 
+### Resizable: drag to adjust
+
+- **In both tabs**, the border between the header columns can be dragged: the cursor turns into
+  a double arrow, the column gains or gives up space and the flexible column absorbs the difference.
+- **In the "CPU Processes" tab**, the divider between the list (left) and the detail (right) is
+  draggable too: the detail gains or loses width as you pull.
+
 ### How the numbers are computed
 
 The kernel snapshot (`NtQuerySystemInformation`) already returns, in the same buffer and at **no
@@ -251,6 +260,34 @@ disturb the event engine) and turns the difference in CPU time into a percentage
 - **Working directory and environment variables are not read**: they require `PROCESS_VM_READ` and fail on elevated processes.
 - **User and integrity level** come from the process token, read once per process (the token does not change while it lives); protected processes may not answer.
 - The list shows **every** process on the machine (500+ in normal use); the snapshot costs a few milliseconds.
+
+---
+
+## ⚡ Performance and footprint (v1.3.0)
+
+The cmdwatch is measured, not optimized in the dark. The full evaluation — with the before, the
+after and the reason behind each change — lives in
+[`docs/otimizacao-1.3.0.md`](docs/otimizacao-1.3.0.md).
+
+| Measurement | Before (v1.2.0) | After (v1.3.0) |
+|---|---|---|
+| Full panel tick (CPU tab closed) | ~0,20 ms | **0,023 ms** (−84%) |
+| Command-line read of the top 40 processes | 2 reads per sample | 1 read per process, cached by PID + start time |
+| CPU list rebuild | every tick | only when the snapshot or the filter changes, and only while the tab is open |
+| Secret masking | on every table repaint | once per sample |
+| Panel in the tray | timers and sampler running | timers and sampler **stopped** (the engine and the log keep running) |
+| App footprint with the GUI visible | 0.60% of the machine | within the ±0.2% noise — the real gain is in the per-tick work |
+| Working set | ~59–64 MB | ~60 MB |
+
+The biggest cost is still the **kernel snapshot** (10.5–13.4 ms per call): that is the price of
+detecting when processes start and end. What v1.3.0 reduced was how many times it gets paid in
+parallel.
+
+To measure it again:
+
+```powershell
+powershell -File .\tools\medir-consumo.ps1 -Exe .\out\cmdwatch.exe -Segundos 60
+```
 
 ---
 

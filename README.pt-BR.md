@@ -89,7 +89,7 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
 
 ## 🚀 Recursos Principais
 
-- 📦 **Executável Único & Portátil:** ~580 KB compilado em C# (.NET Framework 4.8 já embutido no Windows). Sem instalador, sem DLLs e sem runtime extra.
+- 📦 **Executável Único & Portátil:** ~605 KB compilado em C# (.NET Framework 4.8 já embutido no Windows). Sem instalador, sem DLLs e sem runtime extra.
 - 🛡️ **Zero Elevação Obrigatória:** Lê processos e linhas de comando diretamente do PEB (`NtQueryInformationProcess`) sem requerer privilégios de Administrador.
 - 🔍 **Descoberta do Autor do Console (ConPTY / Cascadia):** No Windows Terminal, associa automaticamente as janelas `CASCADIA_HOSTING_WINDOW_CLASS` à sua respectiva `PseudoConsoleWindow`, identificando o processo autor de verdade em vez do hospedeiro da UI.
 - ⚡ **Motor Duplo (Polling & ETW Kernel):**
@@ -98,6 +98,7 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
 - 🔒 **Máscara Automática de Segredos:** Sanitiza tokens, senhas, chaves de API, cabeçalhos `Bearer` e credenciais AWS antes de gravar em disco ou renderizar na tela.
 - 🛑 **Encerramento Seguro contra Colisão de PID:** Permite encerrar scripts e árvores de processos pela UI com verificação rigorosa de data/hora de criação do PID (`GetProcessTimes`), impedindo matar processos reciclados.
 - 🖥️ **Inspetor de CPU e Processos ao Vivo:** uma segunda aba dentro do cartão de sessões lista todos os processos da máquina com consumo de CPU, memória privada, threads e hora de início, ao lado de um painel de detalhe com dono, sessão, linha de comando e cadeia de ancestrais. Os números saem do retrato do kernel, sem custo extra de leitura.
+- 📐 **Painel ajustável:** as colunas das tabelas (nas duas abas) e a divisória entre a lista e o detalhe podem ser redimensionadas arrastando com o mouse.
 - 🎨 **Interface Neon Customizada:** Construída em GDI+ puro sem frameworks pesados, com suporte a tema escuro/claro, busca em tempo real, ordenação de colunas e minimização para a Área de Notificação (Tray).
 
 ---
@@ -156,7 +157,7 @@ flowchart TD
 
 Baixe o executável pronto para uso:
 
-**[⬇ Baixar cmdwatch v1.2.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Baixar cmdwatch v1.3.0 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Abrir o Painel Gráfico
 Dê **duplo clique** no `cmdwatch.exe` ou execute via terminal:
@@ -208,7 +209,8 @@ cmdwatch.exe trace script.cmd
 
 O cartão **Sessões CMD** virou um cartão com duas abas: **Sessões CMD** (o comportamento de sempre) e
 **Processos CPU**, que mostra a fotografia viva da máquina. Na barra de indicadores aparece um quinto
-card, **Uso da CPU**, com o total da máquina em tempo real.
+card, **Uso da CPU**, com o total da máquina em tempo real, e um sexto, **Uso da memória**, com o
+consumo físico em tempo real.
 
 ![Aba Processos CPU](docs/processos-cpu.png)
 
@@ -232,6 +234,13 @@ o **início** e há quanto tempo está vivo, a **CPU instantânea e a média** d
 **memória** e os **threads**, o **executável**, a **linha de comando** quebrada em várias linhas e a
 **cadeia de ancestrais** (quem chamou quem).
 
+### Redimensionável: arraste para ajustar
+
+- **Nas duas abas**, a borda entre as colunas do cabeçalho pode ser arrastada: o cursor vira
+  seta dupla, a coluna em uso cede ou toma espaço e a coluna flexível absorve a diferença.
+- **Na aba "Processos CPU"**, a divisória entre a lista (esquerda) e o detalhe (direita) também
+  é arrastável: o detalhe ganha ou perde largura conforme você puxa.
+
 ### Como os números são calculados
 
 O retrato do kernel (`NtQuerySystemInformation`) já devolve, no mesmo buffer e **sem custo extra de
@@ -251,6 +260,33 @@ motor de eventos) e a diferença do tempo de CPU vira o percentual:
 - **Diretório de trabalho e variáveis de ambiente não são lidos**: exigem `PROCESS_VM_READ` e falham em processo elevado.
 - **Usuário e integridade** vêm do token do processo, lidos uma vez por processo (o token não muda enquanto ele viver); processos protegidos podem não responder.
 - A lista mostra **todos** os processos da máquina (mais de 500 em uso comum); o custo do retrato é de poucos milissegundos.
+
+---
+
+## ⚡ Desempenho e consumo (v1.3.0)
+
+O cmdwatch é medido, não otimizado no escuro. A avaliação completa — com o antes, o depois e o
+motivo de cada mudança — está em [`docs/otimizacao-1.3.0.md`](docs/otimizacao-1.3.0.md).
+
+| Medição | Antes (v1.2.0) | Depois (v1.3.0) |
+|---|---|---|
+| Tique completo do painel (aba de CPU fechada) | ~0,20 ms | **0,023 ms** (−84%) |
+| Leitura da linha de comando dos 40 processos do topo | 2 leituras por amostra | 1 leitura por processo, com cache por PID + hora de início |
+| Remontagem da lista de CPU | a cada tique | só quando o retrato ou o filtro mudam, e só com a aba aberta |
+| Máscara de segredos | a cada repaint da tabela | 1 vez por amostra |
+| Painel na bandeja | timers e amostrador rodando | timers e amostrador **parados** (o motor e o log seguem gravando) |
+| Consumo do app com GUI visível | 0,60% da máquina | dentro do ruído de ±0,2% — o ganho real está no trabalho por tique |
+| Working set | ~59–64 MB | ~60 MB |
+
+O maior custo continua sendo a **varredura do kernel** (10,5–13,4 ms por chamada): é o preço de
+detectar o início e o fim dos processos. O que a v1.3.0 reduziu foi quantas vezes ela é paga em
+paralelo.
+
+Para medir de novo:
+
+```powershell
+powershell -File .\tools\medir-consumo.ps1 -Exe .\out\cmdwatch.exe -Segundos 60
+```
 
 ---
 
