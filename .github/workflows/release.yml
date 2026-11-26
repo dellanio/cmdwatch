@@ -124,6 +124,11 @@ jobs:
             Write-Host "a release $env:TAG ja existe - mantida como esta"
             exit 0
           }
+          $assinatura = if (Test-Path 'signed\cmdwatch.exe') {
+            'Este executavel foi assinado com o certificado da SignPath Foundation.'
+          } else {
+            'Este executavel **ainda nao esta assinado**: a Fundacao SignPath ainda nao aprovou o projeto. A assinatura entra a partir da primeira release aprovada.'
+          }
           $notas = @"
           ## cmdwatch $env:TAG
 
@@ -131,25 +136,31 @@ jobs:
           |---|---|
           | SHA-256 | ``$env:SHA`` |
 
-          ```
-          $env:SHA  cmdwatch.exe
-          ```
+              $env:SHA  cmdwatch.exe
 
           ### Instalar
 
-          ```powershell
-          scoop bucket add dellanio https://github.com/dellanio/scoop-bucket
-          scoop install cmdwatch
-          ```
+              scoop bucket add dellanio https://github.com/dellanio/scoop-bucket
+              scoop install cmdwatch
 
           Ou pelo winget, quando o manifesto for aprovado:
-          ```powershell
-          winget install dellanio.cmdwatch
-          ```
+
+              winget install dellanio.cmdwatch
 
           Ou direto do navegador (o arquivo baixado pelo navegador recebe o
           Mark-of-the-Web e o Windows pode mostrar o aviso do SmartScreen ate
           o arquivo ganhar reputacao).
+
+          ### Assinatura de codigo (code signing)
+
+          Este projeto participa do programa da [SignPath Foundation](https://signpath.org/):
+
+          > Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
+
+          $assinatura
+
+          A politica completa (papeis, privacidade, desinstalacao) esta no
+          [README](https://github.com/dellanio/cmdwatch#code-signing-policy).
           "@
           [IO.File]::WriteAllText('release-notes.md', $notas, (New-Object Text.UTF8Encoding($false)))
           gh release create $env:TAG $env:EXE 'cmdwatch.exe.sha256' --title "cmdwatch $env:TAG" --notes-file 'release-notes.md'
