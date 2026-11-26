@@ -17,6 +17,34 @@ binário ou de medição interna do próprio app.
 Ou seja: **a interface responde por ~0,11% e o motor por ~0,49%**. A caça à
 otimização tinha de ser feita no motor, não no desenho.
 
+## 1b. Medição de controle (v1.3.0, o mesmo binário publicado)
+
+Rodada de 30 s com `tools/medir-consumo.ps1` sobre o `out/cmdwatch.exe` da
+v1.3.0 (620.032 bytes), na mesma máquina:
+
+```
+[cmdwatch v1.3.0] exe=.\out\cmdwatch.exe  nucleos=16
+  23:09:20  cpu=  1,32%  ws=   59,8MB  privado=   40,2MB  threads=14
+  23:09:25  cpu=  0,68%  ws=   60,6MB  privado=   41,0MB  threads=14
+  23:09:30  cpu=  0,35%  ws=   60,6MB  privado=   41,1MB  threads=14
+  23:09:35  cpu=  0,47%  ws=   61,2MB  privado=   41,6MB  threads=14
+  23:09:40  cpu=  0,55%  ws=   61,9MB  privado=   42,3MB  threads=14
+  23:09:45  cpu=  0,49%  ws=   62,3MB  privado=   42,7MB  threads=12
+[cmdwatch v1.3.0] media cpu = 0,64% da maquina | pico ws = 62,3MB | pico privado = 42,7MB
+```
+
+**Leitura honesta:** o consumo **total do processo** ficou em 0,64% contra
+0,60% da linha de base — **dentro do ruído de ±0,2%** desta máquina (o
+primeiro sample de 1,32% é o aquecimento: JIT, primeira varredura do kernel
+e a abertura da lista inteira (~620 processos)). Ou seja: **a otimização não aparece
+no número grosso do `Task Manager`** — ela aparece no trabalho por tique
+(seção 3), que é o que de fato consome quando o painel fica aberto horas
+seguidas com a aba de CPU visível.
+
+O número grosso é dominado pela **varredura do kernel**, que é obrigatória
+(é o preço de detectar o início e o fim dos processos) e não pôde ser
+reduzida sem perder funcionalidade.
+
 ## 2. Onde o custo está (medido, não estimado)
 
 | Operação | Custo medido | Frequência | Peso |
