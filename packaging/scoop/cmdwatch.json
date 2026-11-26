@@ -1,10 +1,10 @@
 {
-    "version": "1.3.1",
+    "version": "1.3.2",
     "description": "Monitor de sessões CMD em tempo real: quem chamou o script, cada comando executado, as janelas abertas e o consumo de CPU e memória de cada processo da máquina.",
     "homepage": "https://github.com/dellanio/cmdwatch",
     "license": "MIT",
-    "url": "https://github.com/dellanio/cmdwatch/releases/download/v1.3.1/cmdwatch.exe",
-    "hash": "80E44C25219C320DABF84A4D40956821EC53785FB3DF1B73AC279C1CF4B1548D",
+    "url": "https://github.com/dellanio/cmdwatch/releases/download/v1.3.2/cmdwatch.exe",
+    "hash": "F823FCEBDD3A618FC8E761A1320A3D6C59529130AEB30408A5156931D92BFEDF",
     "bin": "cmdwatch.exe",
     "checkver": {
         "url": "https://github.com/dellanio/cmdwatch/releases/latest",
@@ -12,10 +12,11 @@
     },
     "autoupdate": {
         "url": "https://github.com/dellanio/cmdwatch/releases/download/v$version/cmdwatch.exe",
-        "hash": "80E44C25219C320DABF84A4D40956821EC53785FB3DF1B73AC279C1CF4B1548D"
+        "hash": "F823FCEBDD3A618FC8E761A1320A3D6C59529130AEB30408A5156931D92BFEDF"
     },
     "notes": [
         "Painel gráfico com sessões CMD e retrato vivo da máquina (CPU e memória).",
-        "Acompanhe scripts .cmd/.bat: autor, comandos executados e janelas abertas."
+        "Acompanhe scripts .cmd/.bat: autor, comandos executados e janelas abertas.",
+        "Botão Esconder Windows na aba de processos: deixa na lista só o que você instalou por fora."
     ]
 }

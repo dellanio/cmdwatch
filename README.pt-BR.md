@@ -97,7 +97,7 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
 
 ## 🚀 Recursos Principais
 
-- 📦 **Executável Único & Portátil:** ~605 KB compilado em C# (.NET Framework 4.8 já embutido no Windows). Sem instalador, sem DLLs e sem runtime extra.
+- 📦 **Executável Único & Portátil:** ~612 KB compilado em C# (.NET Framework 4.8 já embutido no Windows). Sem instalador, sem DLLs e sem runtime extra.
 - 🛡️ **Zero Elevação Obrigatória:** Lê processos e linhas de comando diretamente do PEB (`NtQueryInformationProcess`) sem requerer privilégios de Administrador.
 - 🔍 **Descoberta do Autor do Console (ConPTY / Cascadia):** No Windows Terminal, associa automaticamente as janelas `CASCADIA_HOSTING_WINDOW_CLASS` à sua respectiva `PseudoConsoleWindow`, identificando o processo autor de verdade em vez do hospedeiro da UI.
 - ⚡ **Motor Duplo (Polling & ETW Kernel):**
@@ -167,7 +167,7 @@ flowchart TD
 
 Baixe o executável pronto para uso:
 
-**[⬇ Baixar cmdwatch v1.3.1 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
+**[⬇ Baixar cmdwatch v1.3.2 — cmdwatch.exe](https://github.com/dellanio/cmdwatch/releases/latest/download/cmdwatch.exe)**
 
 ### Instalar pelo Scoop (recomendado no Windows)
 
