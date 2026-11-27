@@ -99,7 +99,7 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 
 ## 🚀 Key Features
 
-- 📦 **Single Portable Executable:** ~612 KB compiled with C# (.NET Framework 4.8, already pre-installed on Windows). Zero installer, zero external DLLs.
+- 📦 **Single Portable Executable:** ~370 KB compiled with C# (.NET Framework 4.8, already pre-installed on Windows). Zero installer, zero external DLLs.
 - 🛡️ **No Administrator Rights Required:** Inspects processes, parameters, and PEB memory (`NtQueryInformationProcess`) without requiring elevation.
 - 🔍 **Accurate Console Author Resolution (ConPTY / Cascadia):** In Windows Terminal, seamlessly correlates `CASCADIA_HOSTING_WINDOW_CLASS` host windows with their underlying `PseudoConsoleWindow`, identifying the real author rather than `WindowsTerminal.exe`.
 - ⚡ **Dual Capture Engines (Polling & Kernel ETW):**

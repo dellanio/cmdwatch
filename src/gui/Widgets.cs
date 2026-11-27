@@ -605,6 +605,8 @@ namespace CmdWatch.Gui
         public readonly List<IconButton> Items = new List<IconButton>();
         public readonly List<NavEntry> Entries = new List<NavEntry>();
         public bool Collapsed;
+        // modo de icones: pedido pelo usuario OU imposto pela largura (janela estreita)
+        private bool Compact { get { return Collapsed || Width < 120; } }
         public string CollapseLabel = "";
         public event Action CollapseToggled;
 
@@ -681,7 +683,7 @@ namespace CmdWatch.Gui
         {
             _itemRects.Clear();
             int itemH = 36;
-            int topY = Collapsed ? 10 : 30;
+            int topY = Compact ? 10 : 30;
             int botCount = 0;
             foreach (NavEntry n in Entries) if (n.BottomGroup) botCount++;
 
@@ -714,7 +716,7 @@ namespace CmdWatch.Gui
 
             const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
 
-            if (!Collapsed)
+            if (!Compact)
             {
                 TextRenderer.DrawText(g, "MONITORAMENTO", Theme.MonoTiny,
                     new Rectangle(14, 8, Width - 20, 16), Theme.Gray, L);
@@ -749,7 +751,7 @@ namespace CmdWatch.Gui
                 }
 
                 Color ic = active ? Theme.Teal : (hot ? Theme.Text : Theme.Dim);
-                if (Collapsed)
+                if (Compact)
                 {
                     Theme.DrawIcon(g, en.Glyph, r, ic, Theme.IconBig);
                 }
@@ -792,9 +794,9 @@ namespace CmdWatch.Gui
                 using (SolidBrush b = new SolidBrush(Theme.Hover))
                     g.FillRectangle(b, _collapseRect.X, _collapseRect.Y + 1, _collapseRect.Width, _collapseRect.Height - 1);
             }
-            string colGlyph = Collapsed ? "\uE76C" : "\uE76B"; // seta direita / esquerda
+            string colGlyph = Compact ? "\uE76C" : "\uE76B"; // seta direita / esquerda
             Color colColor = _hoverCollapse ? Theme.Teal : Theme.Dim;
-            if (Collapsed)
+            if (Compact)
             {
                 Theme.DrawIcon(g, colGlyph, _collapseRect, colColor, Theme.IconFont);
             }
@@ -822,8 +824,8 @@ namespace CmdWatch.Gui
             Cursor = (idx >= 0 || hc) ? Cursors.Hand : Cursors.Default;
 
             string tip = "";
-            if (Collapsed && idx >= 0 && idx < Entries.Count) tip = Entries[idx].Label;
-            else if (Collapsed && hc) tip = CollapseLabel;
+            if (Compact && idx >= 0 && idx < Entries.Count) tip = Entries[idx].Label;
+            else if (Compact && hc) tip = CollapseLabel;
             if (tip != _lastTip) { _lastTip = tip; _tip.SetToolTip(this, tip); }
         }
 
