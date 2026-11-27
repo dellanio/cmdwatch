@@ -5,10 +5,8 @@ using System.Windows.Forms;
 namespace CmdWatch.Gui
 {
     /// <summary>
-    /// Dialogo modal de confirmacao desenhado no tema do painel (o MessageBox
-    /// do Windows apareceria claro sobre a interface escura).
-    ///
-    /// ESC cancela, ENTER confirma.
+    /// Dialogo modal neo-brutalista (0px radius, borda 1px #2A2A2A, cabecalho
+    /// com marcador quadrado amarelo acido). ESC cancela, ENTER confirma.
     /// </summary>
     internal sealed class NeonDialog : Form
     {
@@ -18,10 +16,11 @@ namespace CmdWatch.Gui
         private readonly string _cancelText;
         private readonly Color _okAccent;
 
-        private Rectangle _okRect, _cancelRect;
-        private int _hover = -1;          // 0 = confirmar, 1 = cancelar
-        private const int Pad = 20;
-        private const int BtnW = 112;
+        private Rectangle _okRect, _cancelRect, _closeX;
+        private int _hover = -1; // 0 = confirmar, 1 = cancelar, 2 = X
+        private const int Pad = 18;
+        private const int HeadH = 40;
+        private const int BtnW = 124;
         private const int BtnH = 30;
 
         public NeonDialog(string title, string message, string okText, string cancelText, Color okAccent)
@@ -32,10 +31,11 @@ namespace CmdWatch.Gui
             _cancelText = cancelText ?? "";
             _okAccent = okAccent;
 
+            Text = _title;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Theme.Panel;
+            BackColor = Theme.Surface;
             ForeColor = Theme.Text;
             KeyPreview = true;
             MinimizeBox = false;
@@ -43,21 +43,21 @@ namespace CmdWatch.Gui
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                      ControlStyles.OptimizedDoubleBuffer, true);
 
-            int w = 430;
-            Size msg = TextRenderer.MeasureText(_message, Theme.Ui,
-                new Size(w - Pad * 2, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-            int h = Pad + 26 + 10 + Math.Max(20, msg.Height) + 20 + BtnH + Pad;
+            int w = 460;
+            Size msg = TextRenderer.MeasureText(_message, Theme.MonoSmall,
+                new Size(w - Pad * 2 - 16, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            int bodyH = Math.Max(48, msg.Height + 24);
+            int h = HeadH + 14 + bodyH + 16 + BtnH + 16;
 
             ClientSize = new Size(w, h);
 
-            // [Cancelar] [Fechar] - o cancelador fica a esquerda da acao
-            _okRect = new Rectangle(w - Pad - BtnW, h - Pad - BtnH, BtnW, BtnH);
+            _closeX = new Rectangle(w - 12 - 24, (HeadH - 24) / 2, 24, 24);
+            _okRect = new Rectangle(w - Pad - BtnW, h - 16 - BtnH, BtnW, BtnH);
             _cancelRect = _cancelText.Length > 0
-                ? new Rectangle(_okRect.Left - 10 - BtnW, h - Pad - BtnH, BtnW, BtnH)
-                : Rectangle.Empty;   // so informativo: um botao
+                ? new Rectangle(_okRect.Left - 8 - BtnW, h - 16 - BtnH, BtnW, BtnH)
+                : Rectangle.Empty;
         }
 
-        /// <summary>Mostra o dialogo modal, centrado na janela proprietaria.</summary>
         public static bool Confirm(IWin32Window owner, string title, string message,
             string okText, string cancelText, Color okAccent)
         {
@@ -78,17 +78,38 @@ namespace CmdWatch.Gui
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Theme.Panel);
+            g.Clear(Theme.Surface);
+
+            // Cabecalho neo-brutalista
+            using (SolidBrush hb = new SolidBrush(Theme.Fill))
+                g.FillRectangle(hb, 0, 0, Width, HeadH);
             using (Pen p = new Pen(Theme.Border))
+            {
+                g.DrawLine(p, 0, HeadH, Width, HeadH);
+                g.DrawLine(p, 0, Height - 16 - BtnH - 12, Width, Height - 16 - BtnH - 12);
                 g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+            }
 
-            TextRenderer.DrawText(g, _title, Theme.UiTitle,
-                new Rectangle(Pad, Pad, Width - Pad * 2, 24), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            // Barra de destaque lateral esquerda
+            using (SolidBrush ab = new SolidBrush(_okAccent))
+                g.FillRectangle(ab, 0, 0, 3, HeadH);
 
-            int msgTop = Pad + 26 + 10;
-            TextRenderer.DrawText(g, _message, Theme.Ui,
-                new Rectangle(Pad, msgTop, Width - Pad * 2, Height - msgTop - BtnH - Pad - 10), Theme.Dim,
+            Theme.DrawDot(g, Pad + 3, HeadH / 2, 6, _okAccent);
+            TextRenderer.DrawText(g, _title.ToUpperInvariant(), Theme.UiTitle,
+                new Rectangle(Pad + 14, 0, Width - Pad * 2 - 44, HeadH), Theme.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+
+            // Botao [x]
+            Theme.DrawPanel(g, new Rectangle(_closeX.X, _closeX.Y, _closeX.Width - 1, _closeX.Height - 1),
+                0, Theme.PanelDeep, _hover == 2 ? Theme.Teal : Theme.Border);
+            TextRenderer.DrawText(g, "×", Theme.MonoBold, _closeX, _hover == 2 ? Theme.Teal : Theme.Dim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+            // Caixa interna da mensagem
+            Rectangle msgBox = new Rectangle(Pad, HeadH + 14, Width - Pad * 2 - 1, Height - HeadH - BtnH - 46);
+            Theme.DrawPanel(g, msgBox, 0, Theme.PanelDeep, Theme.Border);
+            TextRenderer.DrawText(g, _message, Theme.MonoSmall,
+                new Rectangle(msgBox.X + 10, msgBox.Y + 10, msgBox.Width - 20, msgBox.Height - 16), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
 
             if (!_cancelRect.IsEmpty) DrawButton(g, _cancelRect, _cancelText, false, _hover == 1);
@@ -97,21 +118,23 @@ namespace CmdWatch.Gui
 
         private void DrawButton(Graphics g, Rectangle r, string text, bool primary, bool hover)
         {
-            // botoes arredondados: a acao e preenchida na cor dela, o cancelar e cinza
+            bool isAcid = _okAccent == Theme.Teal;
             Color fill = primary
-                ? (hover ? Theme.Darken(_okAccent, 0.08f) : _okAccent)
-                : (hover ? Theme.Darken(Theme.Fill, 0.04f) : Theme.Fill);
-            Color cor = primary ? (_okAccent == Theme.Teal ? Theme.Bg : Color.White) : Theme.Text;
+                ? (hover ? (isAcid ? Theme.AcidHover : Theme.Lighten(_okAccent, 0.12f)) : _okAccent)
+                : (hover ? Theme.Hover : Theme.PanelDeep);
+            Color fg = primary ? (isAcid ? Theme.OnAcid : Color.White) : (hover ? Theme.Text : Theme.Dim);
+            Color bd = primary ? Color.Empty : (hover ? Theme.Text : Theme.Border);
 
-            Theme.DrawPanel(g, r, 6, fill, primary ? Color.Empty : Theme.Border);
-            TextRenderer.DrawText(g, text, Theme.UiBold, r, cor,
+            Theme.DrawPanel(g, new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), 0, fill, bd);
+            TextRenderer.DrawText(g, (text ?? "").ToUpperInvariant(), Theme.MonoBold, r, fg,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
 
         private int HitTest(Point p)
         {
             if (_okRect.Contains(p)) return 0;
-            if (_cancelRect.Contains(p)) return 1;
+            if (!_cancelRect.IsEmpty && _cancelRect.Contains(p)) return 1;
+            if (_closeX.Contains(p)) return 2;
             return -1;
         }
 
@@ -138,13 +161,13 @@ namespace CmdWatch.Gui
             base.OnMouseDown(e);
             int h = HitTest(e.Location);
             if (h == 0) { DialogResult = DialogResult.OK; Close(); }
-            else if (h == 1) { DialogResult = DialogResult.Cancel; Close(); }
+            else if (h == 1 || h == 2) { DialogResult = DialogResult.Cancel; Close(); }
         }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            DashboardForm.AplicarMoldura(Handle);   // cantos arredondados no Windows 11
+            DashboardForm.AplicarMoldura(Handle);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)

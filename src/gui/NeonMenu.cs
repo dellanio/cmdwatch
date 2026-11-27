@@ -11,29 +11,29 @@ namespace CmdWatch.Gui
     /// </summary>
     internal sealed class NeonMenuColors : ProfessionalColorTable
     {
-        private static readonly Color Sel = Theme.Cyan;
+        private static readonly Color Sel = Theme.Hover;
 
-        public override Color ToolStripDropDownBackground { get { return Theme.Panel; } }
+        public override Color ToolStripDropDownBackground { get { return Theme.Surface; } }
         public override Color MenuBorder { get { return Theme.Border; } }
-        public override Color MenuItemBorder { get { return Theme.Cyan; } }
+        public override Color MenuItemBorder { get { return Theme.Teal; } }
         public override Color MenuItemSelected { get { return Sel; } }
         public override Color MenuItemSelectedGradientBegin { get { return Sel; } }
         public override Color MenuItemSelectedGradientEnd { get { return Sel; } }
         public override Color MenuItemPressedGradientBegin { get { return Sel; } }
         public override Color MenuItemPressedGradientEnd { get { return Sel; } }
-        public override Color SeparatorDark { get { return Theme.Grid; } }
-        public override Color SeparatorLight { get { return Theme.Grid; } }
-        public override Color ImageMarginGradientBegin { get { return Theme.PanelDeep; } }
-        public override Color ImageMarginGradientMiddle { get { return Theme.PanelDeep; } }
-        public override Color ImageMarginGradientEnd { get { return Theme.PanelDeep; } }
-        public override Color ToolStripGradientBegin { get { return Theme.PanelDeep; } }
-        public override Color ToolStripGradientMiddle { get { return Theme.PanelDeep; } }
-        public override Color ToolStripGradientEnd { get { return Theme.PanelDeep; } }
+        public override Color SeparatorDark { get { return Theme.Border; } }
+        public override Color SeparatorLight { get { return Theme.Border; } }
+        public override Color ImageMarginGradientBegin { get { return Theme.Surface; } }
+        public override Color ImageMarginGradientMiddle { get { return Theme.Surface; } }
+        public override Color ImageMarginGradientEnd { get { return Theme.Surface; } }
+        public override Color ToolStripGradientBegin { get { return Theme.Surface; } }
+        public override Color ToolStripGradientMiddle { get { return Theme.Surface; } }
+        public override Color ToolStripGradientEnd { get { return Theme.Surface; } }
     }
 
     /// <summary>
-    /// Desenha o menu de contexto no estilo do painel: fundo escuro, item
-    /// selecionado em ciano, texto na cor do tema e separadores discretos.
+    /// Desenha o menu de contexto no estilo Hoody: cantos retos, fundo escuro,
+    /// barra lateral amarelo acido no item selecionado e separadores de 1px.
     /// </summary>
     internal sealed class NeonMenuRenderer : ToolStripProfessionalRenderer
     {
@@ -44,7 +44,7 @@ namespace CmdWatch.Gui
 
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
-            using (SolidBrush b = new SolidBrush(Theme.Panel))
+            using (SolidBrush b = new SolidBrush(Theme.Surface))
                 e.Graphics.FillRectangle(b, new Rectangle(Point.Empty, e.ToolStrip.Size));
         }
 
@@ -60,16 +60,17 @@ namespace CmdWatch.Gui
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
             if (!e.Item.Enabled || !e.Item.Selected) return;
-
-            // selecao em pilula azul com texto branco
-            Rectangle r = new Rectangle(4, 1, e.Item.Width - 8, e.Item.Height - 2);
-            Theme.DrawPanel(e.Graphics, r, 5, Theme.Hover, Color.FromArgb(120, Theme.Teal));
+            Rectangle r = new Rectangle(2, 1, e.Item.Width - 4, e.Item.Height - 2);
+            using (SolidBrush b = new SolidBrush(Theme.Hover))
+                e.Graphics.FillRectangle(b, r);
+            using (SolidBrush acc = new SolidBrush(Theme.Teal))
+                e.Graphics.FillRectangle(acc, 2, 1, 3, e.Item.Height - 2);
         }
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             Color c = !e.Item.Enabled ? Theme.Dim : (e.Item.Selected ? Theme.Teal : Theme.Text);
-            Font f = e.TextFont ?? SystemFonts.MenuFont;
+            Font f = !e.Item.Enabled ? Theme.MonoBold : Theme.MonoSmall;
             TextRenderer.DrawText(e.Graphics, e.Text, f, e.TextRectangle, c,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
         }
@@ -77,8 +78,8 @@ namespace CmdWatch.Gui
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
             int y = e.Item.Height / 2;
-            using (Pen p = new Pen(Theme.Grid))
-                e.Graphics.DrawLine(p, 8, y, e.ToolStrip.Width - 8, y);
+            using (Pen p = new Pen(Theme.Border))
+                e.Graphics.DrawLine(p, 6, y, e.ToolStrip.Width - 6, y);
         }
     }
 }

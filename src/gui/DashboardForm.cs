@@ -10,11 +10,11 @@ using System.Windows.Forms;
 namespace CmdWatch.Gui
 {
     /// <summary>
-    /// Painel visual do cmdwatch. Barra superior (nome, estado, busca, pausar,
-    /// configuracoes), barra lateral de icones, faixa de estatisticas, tabelas
-    /// de sessoes e de janelas, fluxo de comandos e grafico de atividade.
-    /// Clicar numa sessao filtra o fluxo; clicar de novo volta a mostrar todas.
-    /// O idioma da interface (PT-BR / EN) e trocavel no rodape.
+    /// Painel visual do cmdwatch no sistema estetico Hoody / Neo-Brutalista:
+    /// cantos 100% retos (0px), bordas estruturais de 1px (#2A2A2A), barra
+    /// superior industrial (#181818), sidebar retratil (204px / 52px), trilho
+    /// utilitario direito (Pin no topo, Grade 40x40px, Exportar Log, Bandeja),
+    /// gaveta lateral de configuracoes e amarelo acido (#E2FF26) como primario.
     /// </summary>
     internal sealed class DashboardForm : Form
     {
@@ -28,7 +28,6 @@ namespace CmdWatch.Gui
         private bool _inTray;
         private readonly DateTime _inicio = DateTime.Now;
 
-        // contadores
         private int _totalSessions, _totalSteps, _totalCalls;
         private int _evAcc, _openAcc, _callAcc;
         private readonly List<SessionRow> _rows = new List<SessionRow>();
@@ -40,11 +39,9 @@ namespace CmdWatch.Gui
         private readonly List<StreamEntry> _entries = new List<StreamEntry>();
         private int _selectedPid;
 
-        // observador de janelas
         private WindowWatcher _janelas;
         private int _totalWindows;
 
-        // controles
         private NeonPanel _pSessions, _pStream, _pActivity, _pWindows;
         private SessionTable _sessions;
         private NeonFlow _stream;
@@ -54,54 +51,50 @@ namespace CmdWatch.Gui
         private CpuSampler _cpuSampler;
         private bool _abaCpu;
         private double _cpuTotal;
-        // memoria da maquina em tempo real (para o indicador da barra)
         private double _memPct;
-        private long _memUsado;
-        private long _memTotal;
-        // ultimo retrato e ultimo filtro usados na aba de CPU: a lista so e
-        // remontada quando um dos dois muda
         private CpuSnapshot _cpuUltimoRetrato;
         private string _cpuUltimoFiltro = "";
         private bool _cpuOcultoAnterior;
-        // quantas linhas a lista de CPU esta mostrando (publicado para a automacao)
         private int _cpuLinhas;
-        // usuario e integridade por processo: a leitura e cara (abre o token
-        // do processo), entao cada processo e consultado uma vez so. A chave
-        // leva a hora de inicio: o Windows recicla o PID e o dono muda.
         private readonly Dictionary<int, CpuUser> _cpuUsuarios = new Dictionary<int, CpuUser>();
+
         private NeonCheckBox _checkTray;
         private StatStrip _stats;
         private SideBar _side;
+        private RightRail _rail;
+        private SettingsDrawer _drawer;
         private SearchBox _busca, _buscaFluxo;
-        private IconButton _btnPausa, _btnFiltro, _btnSessao, _btnCopiar, _btnLimpar, _btnFaixa, _btnIdioma;
+        private IconButton _btnPausa, _btnTopConfig, _btnFiltro, _btnSessao, _btnCopiar, _btnLimpar, _btnFaixa, _btnIdioma;
         private IconButton _btnLimparSess;
-        // "Esconder Windows": na aba de CPU, tira da lista os processos do
-        // sistema e deixa so o que foi instalado por fora
         private IconButton _btnOcultarWin;
+        private IconButton _railPin, _railGrid, _railExport, _railTray;
         private bool _ocultarWindows;
-        // recolher/expandir cada cartao: botao de seta no cabecalho; chave salva em ui.cfg
+        private bool _archGrid = true;
+        private bool _pinTop;
+        private bool _pulseBright = true;
+
         private readonly Dictionary<NeonPanel, IconButton> _chev = new Dictionary<NeonPanel, IconButton>();
         private readonly Dictionary<NeonPanel, string> _chave = new Dictionary<NeonPanel, string>();
         private readonly HashSet<string> _recolhidos = new HashSet<string>();
-        // "Limpar" das sessoes: sessoes ja vistas (pid + inicio do cmd) deixam de ser mostradas
         private readonly Dictionary<int, DateTime> _limpas = new Dictionary<int, DateTime>();
-        private IconButton _navHome, _navLog, _navGrafico, _navConfig;
+
+        private IconButton _navHome, _navSessoes, _navCpu, _navJanelas, _navFluxo, _navGrafico, _navLog, _navConfig;
         private NotifyIcon _tray;
         private ToolStripMenuItem _miRestore, _miOpenLog, _miQuit;
         private readonly ContextMenuStrip _ctxMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _dropMenu = new ContextMenuStrip();
         private System.Windows.Forms.Timer _tick, _slow;
 
-        // filtro da tabela de sessoes: 0 todas, 1 em execucao, 2 encerradas
         private int _filtroSessoes;
 
-        private const int TopH = 52;       // barra superior
-        private const int SideW = 52;      // barra lateral
-        private const int FootH = 38;      // rodape
+        private const int TopH = 52;
+        private const int SideExpandedW = 204;
+        private const int SideCollapsedW = 52;
+        private const int RailW = 38;
+        private const int FootH = 32;
         private const int Pad = 14;
         private const int Gap = 10;
 
-        // aviso temporario no rodape (ex.: "script encerrado")
         private string _notice = "";
         private DateTime _noticeUntil = DateTime.MinValue;
         private Color _noticeColor = Theme.Text;
@@ -109,11 +102,14 @@ namespace CmdWatch.Gui
         public DashboardForm(Options opts)
         {
             _opts = opts;
-            // a preferencia "esconder Windows" fica salva entre as sessoes
             _ocultarWindows = Lang.GetCfg("ocultarWin") == "1";
+            _archGrid = Lang.GetCfg("archGrid") != "0";
+            _pinTop = Lang.GetCfg("pinTop") == "1";
+            TopMost = _pinTop;
+
             Text = Lang.T("v2Title");
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(1000, 620);
+            MinimumSize = new Size(1020, 640);
             BackColor = Theme.Bg;
             ForeColor = Theme.Text;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint |
@@ -124,29 +120,24 @@ namespace CmdWatch.Gui
             try { Icon = AppIcon.Get(32); } catch { }
 
             BuildUi();
-            ClientSize = new Size(1440, 880);
+            ClientSize = new Size(1480, 900);
 
-            _tick = new System.Windows.Forms.Timer();
-            _tick.Interval = 1000;
+            _tick = new System.Windows.Forms.Timer { Interval = 1000 };
             _tick.Tick += OnTick;
             _tick.Start();
 
-            _slow = new System.Windows.Forms.Timer();
-            _slow.Interval = 1000;
+            _slow = new System.Windows.Forms.Timer { Interval = 1000 };
             _slow.Tick += OnSlowTick;
             _slow.Start();
 
-            // amostrador de CPU: uma thread propria que tira o retrato do
-            // kernel de 1 em 1,5 s e publica o resultado (o painel so le)
             _cpuSampler = new CpuSampler(1500);
             _cpuSampler.Iniciar();
         }
 
-        // ------------------------------------------------------------ UI
         private IconButton Botao(Control pai, string glyph, string label, bool chevron, EventHandler click)
         {
             IconButton b = new IconButton { Glyph = glyph, Label = label, Chevron = chevron };
-            b.BackColor = pai is NeonPanel ? Theme.Panel : Theme.Bg;
+            b.BackColor = pai is NeonPanel ? Theme.HeaderBg : Theme.TopBar;
             if (click != null) b.Click += click;
             pai.Controls.Add(b);
             return b;
@@ -155,24 +146,23 @@ namespace CmdWatch.Gui
         private void BuildUi()
         {
             _pSessions = new NeonPanel();
-            _pStream = new NeonPanel();
+            _pStream = new NeonPanel { TerminalSurface = true };
             _pActivity = new NeonPanel();
             _pWindows = new NeonPanel();
 
             _sessions = new SessionTable();
-            _sessions.Name = _sessions.Text = "tabelaSessoes";   // nome estavel para automacao de UI (tools\test-painel.ps1)
+            _sessions.Name = _sessions.Text = "tabelaSessoes";
             _sessions.SelectionChanged += OnSelectionChanged;
             _sessions.ContextRequested += OnSessionContext;
             _pSessions.Controls.Add(_sessions);
 
-            // aba "Processos CPU" dentro do cartao de sessoes: lista de
-            // processos (esquerda) e detalhe (direita)
             _cpu = new CpuView();
             _cpu.Name = _cpu.Text = "cpuProcessos";
             _cpu.Visible = false;
+            _cpu.Tabela.SelectionChanged += delegate { AtualizarDetalheCpu(); };
             _pSessions.Controls.Add(_cpu);
             _pSessions.Tabs = new[] { Lang.T("v2Sessions"), Lang.T("v2CpuTab") };
-            _pSessions.TabGlyphs = new[] { "\uE7F4", "\uE950" };
+            _pSessions.TabGlyphs = new[] { "\uE756", "\uE950" };
             _pSessions.TabChanged += OnTabChanged;
 
             _stream = new NeonFlow();
@@ -188,27 +178,65 @@ namespace CmdWatch.Gui
 
             _stats = new StatStrip();
 
-            // barra lateral: cada icone faz algo real (ver dicas)
             _side = new SideBar();
-            _navHome = _side.Add("\uE80F");
-            _navHome.Active = true;
-            _navHome.Click += delegate { VisaoGeral(); };
-            _navLog = _side.Add("\uE756");
-            _navLog.Click += delegate { OpenLogFile(); };
-            _navGrafico = _side.Add("\uE9D2");
-            _navGrafico.Click += delegate { MenuFaixa(_navGrafico); };
-            _navConfig = _side.Add("\uE713");
-            _navConfig.Click += delegate { MostrarConfig(); };
+            _side.Collapsed = Lang.GetCfg("sideCollapsed") == "1";
+            _side.CollapseToggled += delegate
+            {
+                Lang.SetCfg("sideCollapsed", _side.Collapsed ? "1" : "0");
+                ApplyTexts();
+                LayoutDashboard();
+            };
 
-            // barra superior
-            _busca = new SearchBox { Name = "busca" };
+            _navHome = _side.Add("\uE80F", "", false);
+            _navHome.Active = true;
+            _navHome.Click += delegate { FocarSecao("overview"); };
+
+            _navSessoes = _side.Add("\uE756", "", false);
+            _navSessoes.Click += delegate { FocarSecao("sessoes"); };
+
+            _navCpu = _side.Add("\uE950", "", false);
+            _navCpu.Click += delegate { FocarSecao("cpu"); };
+
+            _navJanelas = _side.Add("\uE737", "", false);
+            _navJanelas.Click += delegate { FocarSecao("janelas"); };
+
+            _navFluxo = _side.Add("\uE943", "", false);
+            _navFluxo.Click += delegate { FocarSecao("fluxo"); };
+
+            _navGrafico = _side.Add("\uE9D2", "", false);
+            _navGrafico.Click += delegate { FocarSecao("atividade"); };
+
+            _navLog = _side.Add("\uE8A5", "", true);
+            _navLog.Click += delegate { OpenLogFile(); };
+
+            _navConfig = _side.Add("\uE713", "", true);
+            _navConfig.Click += delegate { AlternarDrawer(); };
+
+            _rail = new RightRail();
+            _railPin = _rail.Add("\uE718", delegate { AlternarPinTop(!_pinTop); });
+            _railPin.Active = _pinTop;
+            _railGrid = _rail.Add("\uE80A", delegate { AlternarGrade(!_archGrid); });
+            _railGrid.Active = _archGrid;
+            _railExport = _rail.Add("\uEDE1", delegate { ExportarFluxo(); });
+            _railTray = _rail.Add("\uE747", delegate { SendToTray(); });
+
+            _drawer = new SettingsDrawer { Visible = false };
+            _drawer.CloseRequested += delegate { FecharDrawer(); };
+            _drawer.PinToggled += delegate(bool v) { AlternarPinTop(v); };
+            _drawer.GridToggled += delegate(bool v) { AlternarGrade(v); };
+            _drawer.TrayToggled += delegate(bool v) { if (v) { FecharDrawer(); SendToTray(); } };
+            _drawer.OpenLogRequested += delegate { OpenLogFile(); };
+            _drawer.ExportLogRequested += delegate { ExportarFluxo(); };
+
+            _busca = new SearchBox { Name = "busca", BackColor = Theme.TopBar };
             _busca.Box.TextChanged += delegate { OnSlowTick(null, EventArgs.Empty); };
             _btnPausa = Botao(this, "\uE769", "", false, delegate { SetPaused(!_paused); });
+            _btnPausa.PrimaryAcid = true;
+            _btnTopConfig = Botao(this, "\uE713", "", false, delegate { AlternarDrawer(); });
 
-            // cabecalhos dos cartoes
             _btnFiltro = Botao(_pSessions, "\uE71C", "", true, delegate { MenuFiltro(); });
             _btnSessao = Botao(_pStream, "\uE756", "", true, delegate { MenuSessao(); });
-            _buscaFluxo = new SearchBox { BackColor = Theme.Panel };
+            _buscaFluxo = new SearchBox { BackColor = Theme.HeaderBg };
             _buscaFluxo.Box.TextChanged += delegate { RebuildStream(); };
             _pStream.Controls.Add(_buscaFluxo);
             _btnCopiar = Botao(_pStream, "\uE8C8", "", false, delegate { CopiarFluxo(); });
@@ -216,11 +244,9 @@ namespace CmdWatch.Gui
             _btnFaixa = Botao(_pActivity, "", "", true, delegate { MenuFaixa(_btnFaixa); });
             _btnLimparSess = Botao(_pSessions, "\uE894", "", false, delegate { LimparSessoes(); });
             _btnLimparSess.Name = _btnLimparSess.Text = "btnLimparSessoes";
-            // aba "Processos CPU": esconde os processos do Windows
             _btnOcultarWin = Botao(_pSessions, "\uE71C", "", false, delegate { AlternarOcultarWindows(); });
             _btnOcultarWin.Name = _btnOcultarWin.Text = "btnOcultarWindows";
 
-            // seta de recolher em todos os cartoes (nomes estaveis para a automacao de UI)
             _chave[_pSessions] = "sessoes"; _chave[_pWindows] = "janelas";
             _chave[_pStream] = "fluxo"; _chave[_pActivity] = "atividade";
             CarregarRecolhidos();
@@ -233,21 +259,21 @@ namespace CmdWatch.Gui
                 _chev[np] = b;
             }
 
-            // rodape
-            _checkTray = new NeonCheckBox();
+            _checkTray = new NeonCheckBox { BackColor = Theme.TopBar };
             _checkTray.CheckedChanged += OnTrayCheckChanged;
             _btnIdioma = Botao(this, "", "", true, delegate { MenuIdioma(); });
 
-            // menus (contexto da sessao e listas suspensas)
             foreach (ContextMenuStrip m in new[] { _ctxMenu, _dropMenu })
             {
                 m.Renderer = new NeonMenuRenderer();
                 m.ShowImageMargin = false;
                 m.ShowCheckMargin = false;
-                m.Font = Theme.Ui;
+                m.Font = Theme.MonoSmall;
             }
 
+            Controls.Add(_drawer);
             Controls.Add(_side);
+            Controls.Add(_rail);
             Controls.Add(_stats);
             Controls.Add(_pSessions);
             Controls.Add(_pWindows);
@@ -255,30 +281,43 @@ namespace CmdWatch.Gui
             Controls.Add(_pActivity);
             Controls.Add(_checkTray);
             Controls.Add(_busca);
+            _drawer.BringToFront();
 
             ApplyTexts();
             LayoutDashboard();
         }
 
-        /// <summary>Textos de todos os controles no idioma corrente.</summary>
         private void ApplyTexts()
         {
             Text = Lang.T("v2Title");
             _pSessions.Title = Lang.T("v2Sessions");
             _pSessions.Tabs = new[] { Lang.T("v2Sessions"), Lang.T("v2CpuTab") };
-            _pSessions.TabGlyphs = new[] { "\uE7F4", "\uE950" };
+            _pSessions.TabGlyphs = new[] { "\uE756", "\uE950" };
             _pWindows.Title = Lang.T("v2Windows");
             _pStream.Title = Lang.T("v2Flow");
+            _pStream.Subtitle = Lang.T("v2LiveFeed");
             _pActivity.Title = Lang.T("v2Activity");
+            _pActivity.Subtitle = Lang.T("v2Telemetry");
             _activity.LabelA = Lang.T("v2LegCmd");
             _activity.LabelB = Lang.T("v2LegSess");
+
             _stats.Labels = new[] { Lang.T("v2StatSess"), Lang.T("v2StatWin"), Lang.T("v2StatCpu"),
                 Lang.T("v2StatMem"), Lang.T("v2StatCmd"), Lang.T("v2StatTime") };
             _stats.Glyphs = new[] { "\uE756", "\uE737", "\uE950", "\uE8B3", "\uE81E", "\uE823" };
+            _stats.SubLabels[0] = Lang.T("v2SubSess");
+            _stats.SubLabels[1] = Lang.T("v2SubWin");
+            _stats.SubLabels[4] = Lang.T("v2SubCmd");
+            _stats.SubLabels[5] = Lang.T("v2SubTime");
+
             _busca.Cue = Lang.T("v2Search");
             _buscaFluxo.Cue = Lang.T("v2FlowSearch");
             _btnPausa.Glyph = _paused ? "\uE768" : "\uE769";
             _btnPausa.Label = _paused ? Lang.T("v2Resume") : Lang.T("v2Pause");
+            _btnPausa.PrimaryAcid = !_paused;
+            _btnPausa.Active = _paused;
+            _btnTopConfig.Tip = Lang.T("v2Settings");
+            _btnTopConfig.Active = _drawer != null && _drawer.Visible;
+
             _btnFiltro.Label = Lang.T(_filtroSessoes == 1 ? "v2FilterRun" : _filtroSessoes == 2 ? "v2FilterEnd" : "v2FilterAll");
             _btnSessao.Label = Lang.F("v2FlowSess", NomeSessao(_selectedPid));
             _btnCopiar.Tip = Lang.T("v2Copy");
@@ -289,20 +328,35 @@ namespace CmdWatch.Gui
             _btnOcultarWin.Active = _ocultarWindows;
             _btnOcultarWin.Tip = _ocultarWindows ? Lang.T("v2OcultarWinAtivo")
                                                  : Lang.F("v2OcultarWinTip", ClassificadorProcessos.DirWindows);
+
             foreach (KeyValuePair<NeonPanel, IconButton> c in _chev)
             {
                 bool rec = Recolhido(c.Key);
-                c.Value.Glyph = rec ? "\uE70D" : "\uE70E";   // seta para baixo = expandir; para cima = recolher
+                c.Value.Glyph = rec ? "\uE70D" : "\uE70E";
                 c.Value.Tip = Lang.T(rec ? "v2Expand" : "v2Collapse");
                 c.Value.Invalidate();
             }
+
             _btnFaixa.Label = Lang.F("v2Range", _activity.Capacity);
             _checkTray.Label = Lang.T("v2Tray");
             _btnIdioma.Label = Lang.Atual == Idioma.En ? "EN" : "PT-BR";
-            _navHome.Tip = Lang.T("v2NavHome");
-            _navLog.Tip = Lang.T("v2NavLog");
-            _navGrafico.Tip = Lang.T("v2NavChart");
-            _navConfig.Tip = Lang.T("v2Settings");
+
+            _side.SetEntryText(_navHome, Lang.T("v2SideOverview"), Lang.T("v2NavHome"));
+            _side.SetEntryText(_navSessoes, Lang.T("v2SideSessions"), Lang.T("v2Sessions"));
+            _side.SetEntryText(_navCpu, Lang.T("v2SideCpu"), Lang.T("v2CpuTab"));
+            _side.SetEntryText(_navJanelas, Lang.T("v2SideWindows"), Lang.T("v2Windows"));
+            _side.SetEntryText(_navFluxo, Lang.T("v2SideStream"), Lang.T("v2Flow"));
+            _side.SetEntryText(_navGrafico, Lang.T("v2SideActivity"), Lang.T("v2NavChart"));
+            _side.SetEntryText(_navLog, Lang.T("v2SideLogs"), Lang.T("v2NavLog"));
+            _side.SetEntryText(_navConfig, Lang.T("v2Settings"), Lang.T("v2Settings"));
+            _side.CollapseLabel = Lang.T(_side.Collapsed ? "v2SideExpand" : "v2SideCollapse");
+
+            _railPin.Tip = Lang.T("v2AlwaysOnTop");
+            _railGrid.Tip = Lang.T("v2ArchGrid");
+            _railExport.Tip = Lang.T("v2ExportLog");
+            _railTray.Tip = Lang.T("v2Tray");
+
+            SincronizarDrawer();
         }
 
         private void LayoutDashboard()
@@ -311,44 +365,63 @@ namespace CmdWatch.Gui
             int w = ClientSize.Width, h = ClientSize.Height;
             if (w < 200 || h < 200) return;
 
-            // barra superior: busca, pausar e engrenagem a direita
+            bool estreito = w < 1160;
+            int sideW = (_side.Collapsed || estreito) ? SideCollapsedW : SideExpandedW;
+            int railW = RailW;
+
             int bh = 30, by = (TopH - bh) / 2;
-            int pw = _btnPausa.PreferredW() + 6;
-            _btnPausa.SetBounds(w - Pad - pw, by, pw, bh);   // configuracoes ficam so na barra lateral
-            int sw = Math.Min(260, Math.Max(160, w / 6));
-            _busca.SetBounds(_btnPausa.Left - 14 - sw, by, sw, bh);
+            _btnTopConfig.SetBounds(w - 12 - 30, by, 30, bh);
+            int pw = Math.Max(98, _btnPausa.PreferredW() + 6);
+            _btnPausa.SetBounds(_btnTopConfig.Left - 8 - pw, by, pw, bh);
+            int sw = Math.Min(310, Math.Max(170, w / 5));
+            _busca.SetBounds(_btnPausa.Left - 10 - sw, by, sw, bh);
 
-            _side.SetBounds(0, TopH, SideW, h - TopH - FootH);
+            int bodyH = Math.Max(100, h - TopH - FootH);
+            _side.SetBounds(0, TopH, sideW, bodyH);
+            _rail.SetBounds(w - railW, TopH, railW, bodyH);
 
-            int x0 = SideW + Pad, cw = w - x0 - Pad;
-            int y = TopH + 62;                       // titulo da pagina + subtitulo
-            bool compacto = h < 760;                 // janela baixa: cabecalhos e minimos menores
+            if (_drawer.Visible)
+            {
+                int dw = Math.Min(410, Math.Max(320, w / 3));
+                _drawer.SetBounds(w - railW - dw, TopH, dw, bodyH);
+                _drawer.BringToFront();
+            }
+
+            int x0 = sideW + Pad;
+            int cw = Math.Max(300, w - x0 - railW - Pad);
+            bool compacto = h < 760;
+            int headerAreaH = compacto ? 46 : 56;
+            int y = TopH + headerAreaH;
+
             int cab = compacto ? 34 : 40;
             foreach (NeonPanel np in new[] { _pSessions, _pWindows, _pStream, _pActivity }) np.HeaderHeight = cab;
-            int statH = compacto ? 52 : 62;
+
+            int statH = compacto ? 60 : 76;
             _stats.SetBounds(x0, y, cw, statH);
             y += statH + Gap;
 
             int resto = h - FootH - Gap - y;
-            int minT = cab + 26 + 2 * 24 + 6;        // cabecalho + colunas + 2 linhas
-            // cartao recolhido = so a linha do cabecalho; os abertos dividem o espaco livre
+            int minT = cab + 26 + 2 * 24 + 4;
             bool cS = Recolhido(_pSessions), cW = Recolhido(_pWindows), cF = Recolhido(_pStream), cA = Recolhido(_pActivity);
             bool midAberto = !(cF && cA);
-            int midExtra = cF != cA ? cab + Gap : 0;  // um dos dois de baixo recolhido: vira faixa acima do outro
+            int midExtra = cF != cA ? cab + Gap : 0;
             int fixo = (cS ? cab : 0) + (cW ? cab : 0) + (midAberto ? 0 : cab);
-            double peso = (cS ? 0 : 0.25) + (cW ? 0 : 0.30) + (midAberto ? 0.45 : 0);
+            double peso = (cS ? 0 : 0.27) + (cW ? 0 : 0.28) + (midAberto ? 0.45 : 0);
             int livre = Math.Max(0, resto - fixo - midExtra);
             if (peso <= 0) peso = 1;
-            int sessH = cS ? cab : Math.Max(minT, (int)(livre * 0.25 / peso));
-            int winH = cW ? cab : Math.Max(minT, (int)(livre * 0.30 / peso));
-            int midH = midAberto ? Math.Max(130, resto - sessH - winH - Gap * 2 - midExtra) : cab;
+
+            int sessH = cS ? cab : Math.Max(minT, (int)(livre * 0.27 / peso));
+            int winH = cW ? cab : Math.Max(minT, (int)(livre * 0.28 / peso));
+            int midH = midAberto ? Math.Max(126, resto - sessH - winH - Gap * 2 - midExtra) : cab;
+
             _pSessions.SetBounds(x0, y, cw, sessH);
             y += sessH + Gap;
             _pWindows.SetBounds(x0, y, cw, winH);
             y += winH + Gap;
+
             if (cF == cA)
             {
-                int flowW = (int)((cw - Gap) * 0.64);
+                int flowW = (int)((cw - Gap) * 0.63);
                 _pStream.SetBounds(x0, y, flowW, midH);
                 _pActivity.SetBounds(x0 + flowW + Gap, y, cw - flowW - Gap, midH);
             }
@@ -358,32 +431,39 @@ namespace CmdWatch.Gui
                 fechado.SetBounds(x0, y, cw, cab);
                 aberto.SetBounds(x0, y + cab + Gap, cw, midH);
             }
+
             _sessions.Visible = !cS && !_abaCpu;
             _cpu.Visible = !cS && _abaCpu;
-            _windows.Visible = !cW; _stream.Visible = !cF; _activity.Visible = !cA;
+            _windows.Visible = !cW;
+            _stream.Visible = !cF;
+            _activity.Visible = !cA;
 
-            // controles dos cabecalhos dos cartoes (alinhados a direita; a seta fica no canto)
-            int hb = 26, hy = (_pSessions.HeaderHeight - hb) / 2;
+            int hb = 24, hy = (_pSessions.HeaderHeight - hb) / 2;
             foreach (KeyValuePair<NeonPanel, IconButton> c in _chev)
-                c.Value.SetBounds(c.Key.Width - 12 - hb, hy, hb, hb);
-            int dir = 12 + hb + 8;
-            int fw = Math.Max(140, _btnFiltro.PreferredW());
+                c.Value.SetBounds(c.Key.Width - 10 - hb, hy, hb, hb);
+
+            int dir = 10 + hb + 6;
+            int fw = Math.Max(148, _btnFiltro.PreferredW());
             _btnFiltro.SetBounds(_pSessions.Width - dir - fw, hy, fw, hb);
-            _btnFiltro.Visible = !_abaCpu;          // o filtro e das sessoes
+            _btnFiltro.Visible = !_abaCpu;
+
             int lsw = _btnLimparSess.PreferredW() + 4;
-            _btnLimparSess.SetBounds(_btnFiltro.Left - 8 - lsw, hy, lsw, hb);
-            // "Esconder Windows" fica a esquerda do Limpar, so na aba de CPU
+            int rightAnchor = _abaCpu ? (_pSessions.Width - dir) : (_btnFiltro.Left - 6);
+            _btnLimparSess.SetBounds(rightAnchor - lsw, hy, lsw, hb);
+
             int osw = _btnOcultarWin.PreferredW() + 4;
-            _btnOcultarWin.SetBounds(_btnLimparSess.Left - 8 - osw, hy, osw, hb);
+            _btnOcultarWin.SetBounds(_btnLimparSess.Left - 6 - osw, hy, osw, hb);
             _btnOcultarWin.Visible = _abaCpu;
+
             int fx = _pStream.Width - dir;
-            _btnLimpar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 6;
-            _btnCopiar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 10;
-            int qw = Math.Min(170, Math.Max(90, _pStream.Width / 5));
-            _buscaFluxo.SetBounds(fx - qw, hy, qw, hb); fx -= qw + 10;
-            int ssw = Math.Min(220, Math.Max(120, _btnSessao.PreferredW()));
-            ssw = Math.Min(ssw, fx - 170);
+            _btnLimpar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 5;
+            _btnCopiar.SetBounds(fx - hb, hy, hb, hb); fx -= hb + 8;
+            int qw = Math.Min(175, Math.Max(90, _pStream.Width / 5));
+            _buscaFluxo.SetBounds(fx - qw, hy, qw, hb); fx -= qw + 8;
+            int ssw = Math.Min(210, Math.Max(110, _btnSessao.PreferredW()));
+            ssw = Math.Min(ssw, Math.Max(70, fx - 180));
             _btnSessao.SetBounds(fx - ssw, hy, Math.Max(60, ssw), hb);
+
             int rw = _btnFaixa.PreferredW();
             _btnFaixa.SetBounds(_pActivity.Width - dir - rw, hy, rw, hb);
 
@@ -395,16 +475,16 @@ namespace CmdWatch.Gui
                 Rectangle a = par.Key.PlotArea;
                 par.Value.SetBounds(a.X, a.Y, a.Width, a.Height);
             }
-            Rectangle ta = _pStream.PlotArea;
-            _stream.SetBounds(ta.X + 10, ta.Y, ta.Width - 16, ta.Height);
-            Rectangle aa = _pActivity.PlotArea;
-            _activity.SetBounds(aa.X + 6, aa.Y, aa.Width - 12, aa.Height);
 
-            // rodape
+            Rectangle ta = _pStream.PlotArea;
+            _stream.SetBounds(ta.X, ta.Y, ta.Width, ta.Height);
+            Rectangle aa = _pActivity.PlotArea;
+            _activity.SetBounds(aa.X + 4, aa.Y, Math.Max(10, aa.Width - 8), aa.Height);
+
             int fy = h - FootH;
-            _checkTray.SetBounds(x0 + 150, fy + (FootH - 22) / 2, CheckboxWidth(), 22);
-            int iw = 78;
-            _btnIdioma.SetBounds(w - Pad - iw, fy + (FootH - 26) / 2, iw, 26);
+            _checkTray.SetBounds(x0 + 280, fy + (FootH - 20) / 2, CheckboxWidth(), 20);
+            int iw = 76;
+            _btnIdioma.SetBounds(w - 12 - iw, fy + (FootH - 22) / 2, iw, 22);
             Invalidate();
         }
 
@@ -416,8 +496,8 @@ namespace CmdWatch.Gui
 
         private int CheckboxWidth()
         {
-            try { return 15 + 9 + TextRenderer.MeasureText(_checkTray.Label, Theme.Ui).Width + 10; }
-            catch { return 260; }
+            try { return 14 + 8 + TextRenderer.MeasureText(_checkTray.Label.ToUpperInvariant(), Theme.MonoTiny).Width + 10; }
+            catch { return 240; }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -427,42 +507,75 @@ namespace CmdWatch.Gui
             int w = ClientSize.Width, h = ClientSize.Height;
             const TextFormatFlags L = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
-            // barra superior: icone de terminal, nome, divisoria e o estado
+            int sideW = _side != null ? _side.Width : SideExpandedW;
+            Rectangle canvasArea = new Rectangle(sideW, TopH, Math.Max(10, w - sideW - RailW), Math.Max(10, h - TopH - FootH));
+            if (_archGrid) Theme.DrawArchGrid(g, canvasArea);
+
+            using (SolidBrush tb = new SolidBrush(Theme.TopBar))
+            {
+                g.FillRectangle(tb, 0, 0, w, TopH - 1);
+                g.FillRectangle(tb, 0, h - FootH, w, FootH);
+            }
             using (Pen p = new Pen(Theme.Border))
             {
                 g.DrawLine(p, 0, TopH - 1, w, TopH - 1);
                 g.DrawLine(p, 0, h - FootH, w, h - FootH);
             }
-            Rectangle ic = new Rectangle(14, (TopH - 28) / 2, 32, 28);
-            Theme.DrawPanel(g, ic, 6, Color.FromArgb(24, Theme.Teal), Color.FromArgb(170, Theme.Teal));
-            Theme.DrawIcon(g, "\uE756", ic, Theme.Teal);
-            int x = ic.Right + 14;
-            TextRenderer.DrawText(g, "cmdwatch", Theme.UiTitle, new Rectangle(x, 0, 200, TopH), Theme.Text, L);
-            x += TextRenderer.MeasureText(g, "cmdwatch", Theme.UiTitle, Size.Empty, L).Width + 16;
-            using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, x, 16, x, TopH - 16);
-            x += 16;
-            string est = _paused ? Lang.T("v2Paused") : Lang.T("v2Monitoring");
-            Color cest = _paused ? Theme.Amber : Theme.Green;
-            int ew = TextRenderer.MeasureText(g, est, Theme.Ui, Size.Empty, L).Width + 30;
+
+            Rectangle logo = new Rectangle(12, (TopH - 28) / 2, 28, 28);
+            Theme.DrawPanel(g, logo, 0, Theme.Teal, Color.Empty);
+            TextRenderer.DrawText(g, ">_", Theme.MonoBold, logo, Theme.OnAcid,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+            int x = logo.Right + 10;
+            int bwCmd = TextRenderer.MeasureText(g, "CMD", Theme.UiHeader, Size.Empty, L).Width;
+            TextRenderer.DrawText(g, "CMD", Theme.UiHeader, new Rectangle(x, 0, bwCmd + 2, TopH), Theme.Text, L);
+            x += bwCmd;
+            int bwWatch = TextRenderer.MeasureText(g, "watch", Theme.UiHeader, Size.Empty, L).Width;
+            TextRenderer.DrawText(g, "watch", Theme.UiHeader, new Rectangle(x, 0, bwWatch + 4, TopH), Theme.Teal, L);
+            x += bwWatch + 10;
+
+            string verTag = "v" + Program.Version;
+            int vtw = TextRenderer.MeasureText(g, verTag, Theme.MonoTiny, Size.Empty, L).Width + 10;
+            Rectangle verRect = new Rectangle(x, (TopH - 18) / 2, vtw, 18);
+            Theme.DrawPanel(g, verRect, 0, Theme.PanelDeep, Theme.Border);
+            TextRenderer.DrawText(g, verTag, Theme.MonoTiny, verRect, Theme.Dim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            x = verRect.Right + 14;
+
+            using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, x, 14, x, TopH - 14);
+            x += 14;
+
+            string est = (_paused ? Lang.T("v2Paused") : Lang.T("v2Monitoring")).ToUpperInvariant();
+            Color cest = _paused ? Theme.Amber : Theme.Teal;
+            int ew = TextRenderer.MeasureText(g, est, Theme.MonoBold, Size.Empty, L).Width + 28;
             Rectangle pill = new Rectangle(x, (TopH - 24) / 2, ew, 24);
-            Theme.DrawPanel(g, pill, 12, Color.FromArgb(28, cest), Color.FromArgb(150, cest));
-            Theme.DrawDot(g, pill.X + 12, pill.Y + 12, 7, cest);
-            TextRenderer.DrawText(g, est, Theme.Ui, new Rectangle(pill.X + 21, pill.Y, ew - 21, pill.Height), cest, L);
+            Theme.DrawPanel(g, pill, 0, Color.FromArgb(24, cest), cest);
+            Color dotColor = (!_paused && !_pulseBright) ? Color.FromArgb(100, cest) : cest;
+            Theme.DrawDot(g, pill.X + 10, pill.Y + 12, 6, dotColor);
+            TextRenderer.DrawText(g, est, Theme.MonoBold, new Rectangle(pill.X + 19, pill.Y, ew - 20, pill.Height), cest, L);
 
-            // titulo da pagina
-            int x0 = SideW + Pad;
-            TextRenderer.DrawText(g, Lang.T("v2Page"), Theme.UiPage, new Rectangle(x0, TopH + 6, 600, 34), Theme.Text, L);
-            TextRenderer.DrawText(g, Lang.T("v2PageSub"), Theme.Ui, new Rectangle(x0, TopH + 38, 700, 20), Theme.Dim, L);
+            int x0 = sideW + Pad;
+            bool compacto = h < 760;
+            string pageUp = Lang.T("v2Page").ToUpperInvariant();
+            TextRenderer.DrawText(g, pageUp, Theme.UiPage, new Rectangle(x0, TopH + (compacto ? 4 : 7), 420, 26), Theme.Text, L);
+            if (!compacto)
+                TextRenderer.DrawText(g, Lang.T("v2PageSub"), Theme.MonoTiny, new Rectangle(x0, TopH + 33, 620, 16), Theme.Dim, L);
 
-            // rodape: estado, versao e aviso temporario / foco
+            string tele = "ENGINE: " + _engineName.ToUpperInvariant() + " · " + _opts.Interval + "MS   |   MASK: " +
+                          (Mascara.Ativa ? "ON" : "OFF");
+            int teleRight = w - RailW - Pad;
+            TextRenderer.DrawText(g, tele, Theme.MonoTiny, new Rectangle(x0 + 340, TopH + (compacto ? 12 : 16), Math.Max(40, teleRight - (x0 + 340)), 20),
+                Theme.Gray, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+
             int fy = h - FootH;
-            Theme.DrawDot(g, x0 + 4, fy + FootH / 2, 7, cest);
-            TextRenderer.DrawText(g, _paused ? Lang.T("v2FooterPaused") : Lang.T("v2FooterOn"), Theme.Ui,
-                new Rectangle(x0 + 14, fy, 140, FootH), Theme.Text, L);
-            string ver = "v" + Program.Version;
-            int vw = TextRenderer.MeasureText(g, ver, Theme.Ui, Size.Empty, L).Width;
-            int vx = _btnIdioma.Left - 16 - vw;
-            TextRenderer.DrawText(g, ver, Theme.Ui, new Rectangle(vx, fy, vw + 4, FootH), Theme.Dim, L);
+            Theme.DrawDot(g, 16, fy + FootH / 2, 6, cest);
+            string footStatus = (_paused ? Lang.T("v2FooterPaused") : Lang.T("v2FooterOn")).ToUpperInvariant();
+            TextRenderer.DrawText(g, footStatus, Theme.MonoTiny, new Rectangle(26, fy, 190, FootH), cest, L);
+
+            using (Pen p = new Pen(Theme.Border)) g.DrawLine(p, 220, fy + 8, 220, h - 8);
+            string engFoot = _engineName.ToUpperInvariant() + " (" + _opts.Interval + "MS)";
+            TextRenderer.DrawText(g, engFoot, Theme.MonoTiny, new Rectangle(232, fy, 170, FootH), Theme.Dim, L);
 
             string info = "";
             Color ci = Theme.Dim;
@@ -470,13 +583,143 @@ namespace CmdWatch.Gui
             else if (_selectedPid != 0) info = Lang.F("hintFocus", NomeSessao(_selectedPid), _selectedPid);
             if (info.Length > 0)
             {
-                int ix = _checkTray.Right + 20;
-                TextRenderer.DrawText(g, info, Theme.Ui, new Rectangle(ix, fy, Math.Max(20, vx - 20 - ix), FootH), ci,
+                int ix = _checkTray.Right + 14;
+                int maxW = Math.Max(20, _btnIdioma.Left - 14 - ix);
+                TextRenderer.DrawText(g, info, Theme.MonoTiny, new Rectangle(ix, fy, maxW, FootH), ci,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
             }
         }
 
-        // ------------------------------------------------- acoes da interface
+        private void MarcarNavAtivo(IconButton ativo)
+        {
+            foreach (IconButton b in new[] { _navHome, _navSessoes, _navCpu, _navJanelas, _navFluxo, _navGrafico })
+                if (b != null) b.Active = ReferenceEquals(b, ativo);
+            _side.Invalidate();
+        }
+
+        private void FocarSecao(string secao)
+        {
+            FecharDrawer();
+            if (secao == "overview")
+            {
+                MarcarNavAtivo(_navHome);
+                VisaoGeral();
+                return;
+            }
+
+            if (secao == "sessoes")
+            {
+                MarcarNavAtivo(_navSessoes);
+                _recolhidos.Remove("sessoes");
+                _pSessions.SelecionarAba(0);
+            }
+            else if (secao == "cpu")
+            {
+                MarcarNavAtivo(_navCpu);
+                _recolhidos.Remove("sessoes");
+                _pSessions.SelecionarAba(1);
+            }
+            else if (secao == "janelas")
+            {
+                MarcarNavAtivo(_navJanelas);
+                _recolhidos.Remove("janelas");
+            }
+            else if (secao == "fluxo")
+            {
+                MarcarNavAtivo(_navFluxo);
+                _recolhidos.Remove("fluxo");
+            }
+            else if (secao == "atividade")
+            {
+                MarcarNavAtivo(_navGrafico);
+                _recolhidos.Remove("atividade");
+            }
+
+            Lang.SetCfg("recolhidos", string.Join(",", _recolhidos.OrderBy(s => s)));
+            ApplyTexts();
+            LayoutDashboard();
+        }
+
+        private void AlternarPinTop(bool valor)
+        {
+            _pinTop = valor;
+            TopMost = _pinTop;
+            Lang.SetCfg("pinTop", _pinTop ? "1" : "0");
+            if (_railPin != null) { _railPin.Active = _pinTop; _railPin.Invalidate(); }
+            SincronizarDrawer();
+            ShowNotice(Lang.T(_pinTop ? "v2PinOn" : "v2PinOff"), Theme.Teal, 4);
+        }
+
+        private void AlternarGrade(bool valor)
+        {
+            _archGrid = valor;
+            Lang.SetCfg("archGrid", _archGrid ? "1" : "0");
+            if (_railGrid != null) { _railGrid.Active = _archGrid; _railGrid.Invalidate(); }
+            SincronizarDrawer();
+            Invalidate();
+        }
+
+        private void ExportarFluxo()
+        {
+            try
+            {
+                using (SaveFileDialog sfd = new SaveFileDialog())
+                {
+                    sfd.Title = Lang.T("v2ExportLog");
+                    sfd.Filter = "Log (*.log)|*.log|Text (*.txt)|*.txt|All files (*.*)|*.*";
+                    sfd.FileName = "cmdwatch-stream-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log";
+                    if (sfd.ShowDialog(this) != DialogResult.OK) return;
+                    File.WriteAllText(sfd.FileName, _stream.AllText(), Encoding.UTF8);
+                    ShowNotice(Lang.F("v2Exported", Path.GetFileName(sfd.FileName)), Theme.Teal, 6);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowNotice(ex.Message, Theme.Red, 6);
+            }
+        }
+
+        private void AlternarDrawer()
+        {
+            if (_drawer.Visible) FecharDrawer();
+            else
+            {
+                SincronizarDrawer();
+                _drawer.Visible = true;
+                _navConfig.Active = true;
+                _btnTopConfig.Active = true;
+                _side.Invalidate();
+                _btnTopConfig.Invalidate();
+                LayoutDashboard();
+            }
+        }
+
+        private void FecharDrawer()
+        {
+            if (_drawer == null || !_drawer.Visible) return;
+            _drawer.Visible = false;
+            _navConfig.Active = false;
+            _btnTopConfig.Active = false;
+            _side.Invalidate();
+            _btnTopConfig.Invalidate();
+            LayoutDashboard();
+        }
+
+        private void SincronizarDrawer()
+        {
+            if (_drawer == null) return;
+            _drawer.EngineName = _engineName;
+            _drawer.IntervalMs = _opts != null ? _opts.Interval : 150;
+            _drawer.WindowWatcherOn = _janelas != null || (_opts != null && !_opts.NoWindows);
+            _drawer.MaskOn = Mascara.Ativa;
+            _drawer.LogPath = _logPath;
+            _drawer.Filter = _opts != null ? _opts.Filter : "";
+            _drawer.PinOnTop = _pinTop;
+            _drawer.ArchGridOn = _archGrid;
+            _drawer.TrayOn = _inTray;
+            _drawer.Invalidate();
+        }
+
         private string NomeSessao(int pid)
         {
             if (pid == 0) return Lang.T("v2FlowAll");
@@ -484,7 +727,6 @@ namespace CmdWatch.Gui
             return _rowByPid.TryGetValue(pid, out r) ? r.Script : ("PID " + pid);
         }
 
-        /// <summary>Pausa (ou retoma) a exibicao: os eventos que chegam durante a pausa sao descartados pelo painel; o motor continua capturando.</summary>
         private void SetPaused(bool v)
         {
             _paused = v;
@@ -493,25 +735,24 @@ namespace CmdWatch.Gui
             _btnPausa.Invalidate();
         }
 
-        /// <summary>Icone "Visao geral": limpa a busca, o filtro e a selecao de sessao.</summary>
         private void VisaoGeral()
         {
             _busca.Box.Text = "";
             _buscaFluxo.Box.Text = "";
             _filtroSessoes = 0;
+            _recolhidos.Clear();
+            Lang.SetCfg("recolhidos", "");
             _sessions.SetSelection(0);
+            _pSessions.SelecionarAba(0);
             ApplyTexts();
+            LayoutDashboard();
             OnSlowTick(null, EventArgs.Empty);
         }
 
-        /// <summary>
-        /// Troca de aba no cartao de sessoes: "Sessoes CMD" ou
-        /// "Processos CPU". A busca da barra superior passa a filtrar a lista
-        /// da aba ativa.
-        /// </summary>
         private void OnTabChanged(int indice)
         {
             _abaCpu = indice == 1;
+            MarcarNavAtivo(_abaCpu ? _navCpu : _navSessoes);
             LayoutDashboard();
             OnSlowTick(null, EventArgs.Empty);
         }
@@ -522,7 +763,7 @@ namespace CmdWatch.Gui
             foreach (var it in itens)
             {
                 var acao = it.Value;
-                var mi = new ToolStripMenuItem((it.Key == marcado ? "\u2713  " : "     ") + it.Key);
+                var mi = new ToolStripMenuItem((it.Key == marcado ? "■  " : "    ") + it.Key);
                 mi.Click += delegate { acao(); };
                 _dropMenu.Items.Add(mi);
             }
@@ -595,17 +836,8 @@ namespace CmdWatch.Gui
             _stream.ClearFlow();
         }
 
-        /// <summary>
-        /// "Limpar" do cartao Sessoes CMD: esconde todas as sessoes listadas ate
-        /// agora (abertas ou encerradas) e passa a mostrar so as que abrirem
-        /// depois do clique. Nao encerra processos, nao mexe no log nem no
-        /// monitor; o fluxo de comandos tem o seu proprio "Limpar". Uma sessao
-        /// escondida que continue rodando nao volta (mesmo pid e mesmo inicio).
-        /// O contador "ativas" passa a contar so as sessoes mostradas.
-        /// </summary>
         private void LimparSessoes()
         {
-            // na aba de CPU o mesmo botao limpa a selecao do processo
             if (_abaCpu)
             {
                 _cpu.Tabela.Selecionar(-1);
@@ -629,13 +861,6 @@ namespace CmdWatch.Gui
             return _chave.TryGetValue(np, out k) && _recolhidos.Contains(k);
         }
 
-        /// <summary>
-        /// "Esconder Windows" (aba Processos CPU): tira da lista os processos
-        /// do Windows - os que rodam de dentro de C:\Windows e os servicos
-        /// protegidos do sistema (svchost, lsass, csrss...) - e deixa na lista
-        /// so o que foi instalado por fora. Nao encerra nem mexe em processo
-        /// nenhum: e apenas o que a tabela mostra. A escolha fica salva.
-        /// </summary>
         private void AlternarOcultarWindows()
         {
             _ocultarWindows = !_ocultarWindows;
@@ -656,7 +881,6 @@ namespace CmdWatch.Gui
             }
         }
 
-        /// <summary>Seta do cabecalho: recolhe o cartao numa linha ou volta a abri-lo.</summary>
         private void AlternarRecolher(NeonPanel np)
         {
             string k;
@@ -675,17 +899,6 @@ namespace CmdWatch.Gui
                 if (_chave.ContainsValue(s.Trim())) _recolhidos.Add(s.Trim());
         }
 
-        /// <summary>Engrenagem: mostra a configuracao em uso (somente leitura).</summary>
-        private void MostrarConfig()
-        {
-            string msg = Lang.F("v2SettingsMsg", _engineName, _opts.Interval,
-                _janelas != null ? Lang.T("v2On") : Lang.T("v2Off"),
-                _logPath.Length > 0 ? _logPath : Lang.T("v2NoLog"),
-                _opts.Filter.Length > 0 ? _opts.Filter : "*");
-            NeonDialog.Confirm(this, Lang.T("v2Settings"), msg, "OK", "", Theme.Teal);
-        }
-
-        // --------------------------------------------------------- motor
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
@@ -695,25 +908,21 @@ namespace CmdWatch.Gui
             AplicarMoldura(Handle);
         }
 
-        /// <summary>
-        /// Moldura da janela no Windows 11: modo claro/escuro conforme o tema,
-        /// cantos arredondados e barra de titulo na cor do fundo do painel (a
-        /// barra e o conteudo parecem uma peca so). Em sistemas sem esses
-        /// atributos as chamadas falham em silencio.
-        /// </summary>
         internal static void AplicarMoldura(IntPtr hwnd)
         {
             try
             {
                 int dark = Theme.Dark ? 1 : 0;
-                DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int));   // DWMWA_USE_IMMERSIVE_DARK_MODE
-                DwmSetWindowAttribute(hwnd, 19, ref dark, sizeof(int));   // idem, builds antigas
-                int canto = 2;                                            // DWMWCP_ROUND
-                DwmSetWindowAttribute(hwnd, 33, ref canto, sizeof(int));  // DWMWA_WINDOW_CORNER_PREFERENCE
-                int legenda = ColorTranslator.ToWin32(Theme.Bg);   // barra de titulo na cor do fundo
-                DwmSetWindowAttribute(hwnd, 35, ref legenda, sizeof(int)); // DWMWA_CAPTION_COLOR
+                DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int));
+                DwmSetWindowAttribute(hwnd, 19, ref dark, sizeof(int));
+                int canto = 1;
+                DwmSetWindowAttribute(hwnd, 33, ref canto, sizeof(int));
+                int legenda = ColorTranslator.ToWin32(Theme.TopBar);
+                DwmSetWindowAttribute(hwnd, 35, ref legenda, sizeof(int));
                 int texto = ColorTranslator.ToWin32(Theme.Text);
-                DwmSetWindowAttribute(hwnd, 36, ref texto, sizeof(int));   // DWMWA_TEXT_COLOR
+                DwmSetWindowAttribute(hwnd, 36, ref texto, sizeof(int));
+                int borda = ColorTranslator.ToWin32(Theme.Border);
+                DwmSetWindowAttribute(hwnd, 34, ref borda, sizeof(int));
             }
             catch { }
         }
@@ -732,8 +941,6 @@ namespace CmdWatch.Gui
             _engine = EngineFactory.Criar(_opts.Engine, _opts.Interval, Program.IsAdmin(), out engine, out aviso);
             _engineName = engine;
 
-            // observador de janelas: cada janela que abre vira um evento e
-            // acorda o motor de processos na hora
             if (!_opts.NoWindows)
             {
                 _janelas = new WindowWatcher { Processos = _watcher };
@@ -754,16 +961,14 @@ namespace CmdWatch.Gui
             LogOpen ab = new LogOpen();
             if (_opts.LogPath.Length > 0)
             {
-                // o log pode mudar de lugar (pasta atual sem escrita) ou falhar:
-                // o aviso vai para o cabecalho, nao some em silencio
                 ab = LogFile.Abrir(_opts.LogPath);
                 _log = ab.Writer;
                 _logPath = ab.Caminho;
             }
 
             BuildTray();
+            SincronizarDrawer();
 
-            // cabecalho no mesmo formato do CLI
             RunInfo info = new RunInfo();
             info.Version = Program.Version;
             info.Engine = _engineName;
@@ -793,7 +998,8 @@ namespace CmdWatch.Gui
         {
             if (keyData == Keys.Escape)
             {
-                if (_selectedPid != 0) { _sessions.SelectedPid = 0; OnSelectionChanged(); return true; }
+                if (_drawer != null && _drawer.Visible) { FecharDrawer(); return true; }
+                if (_selectedPid != 0) { _sessions.SetSelection(0); return true; }
                 if (_inTray) { RestoreFromTray(); return true; }
                 Close();
                 return true;
@@ -803,7 +1009,6 @@ namespace CmdWatch.Gui
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        // ------------------------------------------------------- bandeja
         private void BuildTray()
         {
             try
@@ -813,7 +1018,7 @@ namespace CmdWatch.Gui
                 _tray.Icon = ico != null ? ico : SystemIcons.Application;
                 _tray.Text = Lang.T("trayTitle");
 
-                ContextMenuStrip menu = new ContextMenuStrip();
+                ContextMenuStrip menu = new ContextMenuStrip { Renderer = new NeonMenuRenderer(), ShowImageMargin = false };
                 _miRestore = new ToolStripMenuItem(Lang.T("trayRestore"));
                 _miRestore.Click += delegate { RestoreFromTray(); };
                 _miOpenLog = new ToolStripMenuItem(Lang.T("trayOpenLog"));
@@ -832,7 +1037,6 @@ namespace CmdWatch.Gui
             catch { _tray = null; }
         }
 
-        /// <summary>Reaplica os textos da bandeja no idioma corrente.</summary>
         private void ApplyTrayTexts()
         {
             if (_tray == null) return;
@@ -857,14 +1061,14 @@ namespace CmdWatch.Gui
             _inTray = true;
             try
             {
-                _tray.Visible = true;
-                _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayTip"), ToolTipIcon.Info);
+                if (_tray != null)
+                {
+                    _tray.Visible = true;
+                    _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayTip"), ToolTipIcon.Info);
+                }
             }
             catch { }
             Hide();
-            // escondida, a interface nao precisa repintar nem remontar as
-            // listas: o motor continua monitorando (e o log continua sendo
-            // escrito), mas o painel para de gastar CPU
             try { if (_tick != null) _tick.Stop(); } catch { }
             try { if (_slow != null) _slow.Stop(); } catch { }
             try { if (_cpuSampler != null) _cpuSampler.Parar(); } catch { }
@@ -874,12 +1078,12 @@ namespace CmdWatch.Gui
         {
             _inTray = false;
             try { if (_tray != null) _tray.Visible = false; } catch { }
-            _checkTray.Checked = false;   // sem disparar o evento
+            _checkTray.Checked = false;
             _checkTray.Invalidate();
+            SincronizarDrawer();
             Show();
             WindowState = FormWindowState.Normal;
             Activate();
-            // volta a atualizar o painel
             try { if (_tick != null && !_tick.Enabled) _tick.Start(); } catch { }
             try { if (_slow != null && !_slow.Enabled) _slow.Start(); } catch { }
             try { if (_cpuSampler != null) _cpuSampler.Iniciar(); } catch { }
@@ -892,8 +1096,8 @@ namespace CmdWatch.Gui
             {
                 if (_logPath.Length > 0 && File.Exists(_logPath))
                     Process.Start("notepad.exe", "\"" + _logPath + "\"");
-                else if (_tray != null)
-                    _tray.ShowBalloonTip(2500, "cmdwatch", Lang.T("trayNoLog"), ToolTipIcon.Info);
+                else
+                    ShowNotice(Lang.T("trayNoLog"), Theme.Amber, 4);
             }
             catch { }
         }
@@ -905,7 +1109,6 @@ namespace CmdWatch.Gui
             Application.Exit();
         }
 
-        // ------------------------------------------------------- idioma
         private void OnLanguageIndexChanged(int index)
         {
             Lang.Set(index == 1 ? Idioma.En : Idioma.PtBr);
@@ -913,44 +1116,33 @@ namespace CmdWatch.Gui
             ApplyLanguage();
         }
 
-        /// <summary>Redesenha toda a interface no idioma escolhido.</summary>
         private void ApplyLanguage()
         {
             ApplyTexts();
             LayoutDashboard();
             RebuildStream();
             ApplyTrayTexts();
-            // o menu de contexto fica com o rotulo antigo: fecha
             try { if (_ctxMenu.Visible) _ctxMenu.Close(); } catch { }
-            foreach (Control c in new Control[] { _pSessions, _pStream, _pActivity, _pWindows, _sessions, _windows, _activity, _stats, _checkTray, _cpu, _cpu.Tabela, _cpu.Detalhe })
-                c.Invalidate();
+            foreach (Control c in new Control[] { _pSessions, _pStream, _pActivity, _pWindows, _sessions, _windows, _activity, _stats, _checkTray, _cpu, _cpu.Tabela, _cpu.Detalhe, _side, _rail, _drawer })
+                if (c != null) c.Invalidate();
             Invalidate();
         }
 
-        // ------------------------------------------- menu de contexto
-        /// <summary>
-        /// Botao direito sobre uma sessao: monta o menu com a opcao "Fechar",
-        /// que encerra o script em execucao.
-        /// </summary>
         private void OnSessionContext(int pid, Point screenPoint)
         {
             SessionRow r;
             if (!_rowByPid.TryGetValue(pid, out r)) return;
 
             _ctxMenu.Items.Clear();
-
-            // cabecalho: identifica o alvo do comando
-            ToolStripMenuItem head = new ToolStripMenuItem(r.Script + "   (PID " + r.Pid + ")");
-            head.Enabled = false;
+            ToolStripMenuItem head = new ToolStripMenuItem(r.Script + "   (PID " + r.Pid + ")   ") { Enabled = false };
             _ctxMenu.Items.Add(head);
             _ctxMenu.Items.Add(new ToolStripSeparator());
 
-            ToolStripMenuItem fechar = new ToolStripMenuItem(Lang.T("menuClose"));
+            ToolStripMenuItem fechar = new ToolStripMenuItem(Lang.T("menuClose") + "   ");
             fechar.Enabled = !r.Closed;
             fechar.Click += delegate
             {
                 SessionRow alvo = r;
-                // adia para o menu terminar de fechar antes do dialogo modal
                 try { BeginInvoke(new Action(delegate { AskCloseSession(alvo); })); }
                 catch { AskCloseSession(alvo); }
             };
@@ -959,10 +1151,6 @@ namespace CmdWatch.Gui
             try { _ctxMenu.Show(screenPoint); } catch { }
         }
 
-        /// <summary>
-        /// Confirma e encerra a sessao: mata o cmd.exe do script e os
-        /// processos filhos que ele deixou rodando.
-        /// </summary>
         private void AskCloseSession(SessionRow r)
         {
             string msg = Lang.F("confirmCloseMsg", r.Script, r.Pid);
@@ -973,11 +1161,10 @@ namespace CmdWatch.Gui
             TerminateResult res = ProcessControl.Terminate(r.Pid, true, r.CmdStartedAt);
             if (res.Ok)
             {
-                // a sessao morre agora: o monitor ainda emitira o batch_close
                 r.Closed = true;
                 r.ClosedAt = DateTime.Now;
                 _sessions.Invalidate();
-                ShowNotice(Lang.F("noticeClosed", r.Script), Theme.Green, 6);
+                ShowNotice(Lang.F("noticeClosed", r.Script), Theme.Teal, 6);
             }
             else if (res.AlreadyGone)
             {
@@ -995,11 +1182,10 @@ namespace CmdWatch.Gui
             if (!_winByHwnd.TryGetValue(hwnd, out r)) return;
             _ctxMenu.Items.Clear();
             string nome = r.AuthorName.Length > 0 ? r.AuthorName : "?";
-            ToolStripMenuItem head = new ToolStripMenuItem(nome + "   (PID " + r.AuthorPid + ")");
-            head.Enabled = false;
+            ToolStripMenuItem head = new ToolStripMenuItem(nome + "   (PID " + r.AuthorPid + ")   ") { Enabled = false };
             _ctxMenu.Items.Add(head);
             _ctxMenu.Items.Add(new ToolStripSeparator());
-            ToolStripMenuItem encerrar = new ToolStripMenuItem(Lang.T("menuCloseWin"));
+            ToolStripMenuItem encerrar = new ToolStripMenuItem(Lang.T("menuCloseWin") + "   ");
             encerrar.Enabled = !r.Closed && r.AuthorPid > 0;
             encerrar.Click += delegate
             {
@@ -1011,10 +1197,6 @@ namespace CmdWatch.Gui
             try { _ctxMenu.Show(screenPoint); } catch { }
         }
 
-        /// <summary>
-        /// Confirma e encerra o autor da janela (e os processos que ele deixou
-        /// rodando), com a mesma checagem de hora de inicio das sessoes.
-        /// </summary>
         private void AskCloseWindow(WindowRow r)
         {
             string nome = r.AuthorName.Length > 0 ? r.AuthorName : ("PID " + r.AuthorPid);
@@ -1033,7 +1215,7 @@ namespace CmdWatch.Gui
                 r.Closed = true;
                 r.ClosedAt = DateTime.Now;
                 _windows.Invalidate();
-                ShowNotice(Lang.F("noticeWinClosed", nome), Theme.Green, 6);
+                ShowNotice(Lang.F("noticeWinClosed", nome), Theme.Teal, 6);
             }
             else if (res.AlreadyGone)
             {
@@ -1045,7 +1227,6 @@ namespace CmdWatch.Gui
             }
         }
 
-        /// <summary>Mensagem temporaria no rodape do painel.</summary>
         private void ShowNotice(string text, Color color, int seconds)
         {
             _notice = text ?? "";
@@ -1054,7 +1235,6 @@ namespace CmdWatch.Gui
             Invalidate();
         }
 
-        // ------------------------------------------------------- eventos
         private void OnWatchEvent(WatchEvent ev)
         {
             try
@@ -1089,7 +1269,6 @@ namespace CmdWatch.Gui
                     TouchRow(ev);
                     break;
                 case "batch_call":
-                    // a chamada de um script dentro de outro
                     _callAcc++;
                     _totalCalls++;
                     TouchRow(ev);
@@ -1110,12 +1289,6 @@ namespace CmdWatch.Gui
             }
         }
 
-        // ------------------------------------------------------- janelas
-        /// <summary>
-        /// Uma janela mudou (abriu, ganhou foco, escondeu, fechou). O evento
-        /// entra pelo mesmo caminho dos outros: o log e o fluxo do painel falam
-        /// a mesma lingua que a saida do CLI.
-        /// </summary>
         private void OnWindowChanged(WindowRecord rec, string tipo)
         {
             try
@@ -1132,20 +1305,15 @@ namespace CmdWatch.Gui
             catch { }
         }
 
-        /// <summary>Atualiza a linha da janela na tabela.</summary>
         private void ApplyWindow(WindowRecord rec)
         {
-            if (rec == null) return;
-            // PseudoConsole auxiliar do Windows Terminal: nao conta em dobro
-            if (rec.Auxiliar) return;
+            if (rec == null || rec.Auxiliar) return;
             try
             {
                 WindowRow r;
                 if (!_winByHwnd.TryGetValue(rec.Hwnd, out r))
                 {
-                    r = new WindowRow();
-                    r.Hwnd = rec.Hwnd;
-                    r.StartedAt = rec.FirstSeen;
+                    r = new WindowRow { Hwnd = rec.Hwnd, StartedAt = rec.FirstSeen };
                     _winByHwnd[rec.Hwnd] = r;
                     _winOrder.Add(rec.Hwnd);
                 }
@@ -1164,7 +1332,6 @@ namespace CmdWatch.Gui
                         r.Author = r.Author + " <= " + pai.Name + "(" + pai.Pid + ")";
                 }
                 r.OriginTip = r.Origin;
-                // Dados conhecidos, sem tentar resolver novamente o PID (pode ter sido reutilizado).
                 foreach (ProcInfo p in rec.Chain.Where(p => p != null && p.CmdLine.Length > 0))
                     r.OriginTip += Environment.NewLine + p.Name + " (" + p.Pid + "): " + Mascara.Aplicar(p.CmdLine);
                 r.CmdLine = Mascara.Aplicar(rec.AuthorCmdLine);
@@ -1178,8 +1345,6 @@ namespace CmdWatch.Gui
                 r.ClosedAt = rec.ClosedAt;
                 r.ByConsole = rec.AutorPeloConsole;
 
-                // descarta as janelas fechadas mais antigas (a tabela nao cresce
-                // para sempre)
                 if (_winOrder.Count > 200)
                 {
                     int removidas = 0;
@@ -1202,17 +1367,16 @@ namespace CmdWatch.Gui
 
         private void AddRow(BatchSession s)
         {
-            if (s == null) return;
-            if (_rowByPid.ContainsKey(s.CmdPid)) return;
+            if (s == null || _rowByPid.ContainsKey(s.CmdPid)) return;
             DateTime limpa;
-            if (_limpas.TryGetValue(s.CmdPid, out limpa) && limpa == s.CmdStartedAt) return;   // escondida pelo "Limpar"
-            SessionRow r = new SessionRow();
-            r.Pid = s.CmdPid;
-            r.Script = s.ScriptName;
-            r.StartedAt = s.StartedAt;
-            r.CmdStartedAt = s.CmdStartedAt;
-            // teste do encerramento seguro pelo painel (tools\test-painel.ps1): simula
-            // um registro velho, como se o pid tivesse sido reaproveitado
+            if (_limpas.TryGetValue(s.CmdPid, out limpa) && limpa == s.CmdStartedAt) return;
+            SessionRow r = new SessionRow
+            {
+                Pid = s.CmdPid,
+                Script = s.ScriptName,
+                StartedAt = s.StartedAt,
+                CmdStartedAt = s.CmdStartedAt
+            };
             if (r.CmdStartedAt != DateTime.MinValue && Environment.GetEnvironmentVariable("CMDWATCH_TESTE_PID_VELHO") == "1")
                 r.CmdStartedAt = r.CmdStartedAt.AddSeconds(-10);
             r.Caller = s.Caller != null ? s.Caller.Name + " (" + s.Caller.Pid + ")" : "—";
@@ -1240,7 +1404,6 @@ namespace CmdWatch.Gui
             r.Steps = s.StepCount;
         }
 
-        // ------------------------------------------------------- fluxo
         private void AppendEvent(WatchEvent ev)
         {
             int pid = ev.Session != null ? ev.Session.CmdPid : 0;
@@ -1262,7 +1425,6 @@ namespace CmdWatch.Gui
             if (_selectedPid == 0 || en.Pid == _selectedPid) _stream.Append(lines);
         }
 
-        /// <summary>Formata uma entrada do fluxo (evento ou cabecalho) no idioma corrente.</summary>
         private static List<HumanLine> FormatEntry(StreamEntry en)
         {
             if (en.Event != null) return HumanFormat.Render(en.Event);
@@ -1270,10 +1432,6 @@ namespace CmdWatch.Gui
             return new List<HumanLine>();
         }
 
-        /// <summary>
-        /// Redesenha o fluxo aplicando (ou removendo) o filtro de sessao.
-        /// Tambem e usado na troca de idioma: as mensagens sao reformuladas.
-        /// </summary>
         private void RebuildStream()
         {
             List<HumanLine> all = new List<HumanLine>();
@@ -1284,7 +1442,6 @@ namespace CmdWatch.Gui
                 if (_selectedPid != 0 && en.Pid != _selectedPid) continue;
                 all.AddRange(FormatEntry(en));
             }
-            // busca no fluxo: so as linhas que contem o texto
             string q = _buscaFluxo != null ? _buscaFluxo.Box.Text.Trim() : "";
             if (q.Length > 0) all = all.Where(l => Contem(l.Text, q)).ToList();
             _stream.SetLines(all);
@@ -1300,24 +1457,47 @@ namespace CmdWatch.Gui
             Invalidate();
         }
 
+        private void AtualizarDetalheCpu()
+        {
+            CpuSnapshot snap = CpuFeed.Atual;
+            if (snap == null || snap.Processos.Count == 0) return;
+            CpuRow sel = null;
+            foreach (CpuRow r in snap.Processos)
+                if (r.Pid == _cpu.Tabela.SelecionadoPid) { sel = CopiaCpu(r); break; }
+            if (sel != null)
+            {
+                CpuUser dono;
+                if (!_cpuUsuarios.TryGetValue(sel.Pid, out dono) || dono.Inicio != sel.StartedAt)
+                {
+                    string usr;
+                    bool elev;
+                    if (NativeProcess.TryGetUserAndIntegrity(sel.Pid, out usr, out elev))
+                    {
+                        dono = new CpuUser { Inicio = sel.StartedAt, User = usr, Elevado = elev };
+                        _cpuUsuarios[sel.Pid] = dono;
+                        if (_cpuUsuarios.Count > 2000) _cpuUsuarios.Clear();
+                    }
+                    else dono = null;
+                }
+                if (dono != null) { sel.User = dono.User; sel.Elevado = dono.Elevado; }
+                _cpu.Detalhe.Selecionar(sel, snap.Processos);
+            }
+            else _cpu.Detalhe.Selecionar(null, snap.Processos);
+        }
+
         private static bool Contem(string texto, string busca)
         {
             return texto != null && texto.IndexOf(busca, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        /// <summary>Titulo do painel de sessoes: sessoes + chamadas de script.</summary>
-        private string SessionsTitle()
-        {
-            string t = _totalSessions + " " + Lang.T("sessionsShort");
-            if (_totalCalls > 0) t += "  ·  " + _totalCalls + " " + Lang.T("callsShort");
-            return t;
-        }
-
-        // -------------------------------------------------------- timers
         private void OnTick(object sender, EventArgs e)
         {
             try
             {
+                _pulseBright = !_pulseBright;
+                _stream.CursorVisible = _pulseBright;
+                _stream.Invalidate();
+
                 _eventsPerSec.Enqueue(_evAcc);
                 _opensPerSec.Enqueue(_openAcc);
                 _evAcc = 0; _openAcc = 0;
@@ -1328,12 +1508,11 @@ namespace CmdWatch.Gui
                 _activity.SeriesB = new List<double>(_opensPerSec);
                 _activity.Invalidate();
 
-                // aviso temporario: some sozinho
                 if (_notice.Length > 0 && DateTime.Now >= _noticeUntil)
                 {
                     _notice = "";
-                    Invalidate();
                 }
+                Invalidate(new Rectangle(0, 0, ClientSize.Width, TopH));
             }
             catch { }
         }
@@ -1342,7 +1521,6 @@ namespace CmdWatch.Gui
         {
             try
             {
-                // busca da barra superior: script, chamador ou pid; mais o filtro do cartao
                 string q = _busca != null ? _busca.Box.Text.Trim() : "";
                 _sessions.Rows = _rows.Where(r => (q.Length == 0 || Contem(r.Script, q) || Contem(r.Caller, q) || r.Pid.ToString() == q)
                                                   && (_filtroSessoes == 0 || (_filtroSessoes == 1) != r.Closed))
@@ -1350,7 +1528,6 @@ namespace CmdWatch.Gui
                 _sessions.Invalidate();
                 _pSessions.TitleValue = _sessions.Rows.Count.ToString();
 
-                // a tabela de janelas: duracao correndo e estado atual
                 var winRows = new List<WindowRow>();
                 foreach (IntPtr h in _winOrder)
                 {
@@ -1364,20 +1541,15 @@ namespace CmdWatch.Gui
                 _pWindows.TitleValue = _windows.Rows.Count.ToString();
                 _pWindows.Invalidate();
 
-                // aba "Processos CPU": o retrato mais recente do amostrador
                 CpuSnapshot snap = CpuFeed.Atual;
                 int visiveisProcessos = 0;
                 if (snap != null && snap.Processos.Count > 0)
                 {
                     _cpuTotal = snap.UsoTotal;
-                    // o filtro "esconder Windows" roda antes do filtro de texto:
-                    // a lista e remontada so com o que sobra
                     List<CpuRow> visiveis = snap.Processos;
                     if (_ocultarWindows) visiveis = ClassificadorProcessos.SemWindows(snap.Processos);
                     visiveisProcessos = visiveis.Count;
-                    // a lista so e remontada quando o retrato muda (o amostrador
-                    // publica a cada 1,5 s) ou quando o filtro muda - e apenas
-                    // quando a aba esta aberta
+
                     bool retratoNovo = !ReferenceEquals(snap, _cpuUltimoRetrato);
                     bool filtroNovo = _cpuUltimoFiltro != q;
                     bool ocultoNovo = _cpuOcultoAnterior != _ocultarWindows;
@@ -1390,8 +1562,6 @@ namespace CmdWatch.Gui
                         _cpu.Tabela.Filtrar(visiveis, q);
                         _cpuLinhas = _cpu.Tabela.Rows.Count;
 
-                        // com filtro ativo, um processo que saiu da lista nao pode
-                        // continuar selecionado (o detalhe mostraria algo invisivel)
                         if ((_cpu.Tabela.Filtro.Length > 0 || _ocultarWindows) && _cpu.Tabela.SelecionadoPid >= 0)
                         {
                             bool visivel = false;
@@ -1400,70 +1570,44 @@ namespace CmdWatch.Gui
                             if (!visivel) _cpu.Tabela.Selecionar(-1);
                         }
 
-                        // sem escolha, o topo da lista fica selecionado (o processo
-                        // que mais esta usando a CPU)
                         if (_cpu.Tabela.SelecionadoPid < 0 && _cpu.Tabela.Rows.Count > 0)
                             _cpu.Tabela.Selecionar(_cpu.Tabela.Rows[0].Pid);
 
-                        // detalhe do processo escolhido: usuario e integridade
-                        // sao lidos sob demanda (uma consulta por processo)
-                        CpuRow sel = null;
-                        foreach (CpuRow r in snap.Processos)
-                            if (r.Pid == _cpu.Tabela.SelecionadoPid) { sel = CopiaCpu(r); break; }
-                        if (sel != null)
-                        {
-                            // usuario e integridade: lidos uma vez por processo
-                            // (o token nao muda enquanto o processo viver)
-                            CpuUser dono;
-                            if (!_cpuUsuarios.TryGetValue(sel.Pid, out dono) || dono.Inicio != sel.StartedAt)
-                            {
-                                string usr;
-                                bool elev;
-                                if (NativeProcess.TryGetUserAndIntegrity(sel.Pid, out usr, out elev))
-                                {
-                                    dono = new CpuUser();
-                                    dono.Inicio = sel.StartedAt;
-                                    dono.User = usr;
-                                    dono.Elevado = elev;
-                                    _cpuUsuarios[sel.Pid] = dono;
-                                    if (_cpuUsuarios.Count > 2000) _cpuUsuarios.Clear();
-                                }
-                                else dono = null;   // falhou: tenta de novo no proximo tique
-                            }
-                            if (dono != null) { sel.User = dono.User; sel.Elevado = dono.Elevado; }
-                            _cpu.Detalhe.Selecionar(sel, snap.Processos);
-                        }
-                        else _cpu.Detalhe.Selecionar(null, snap.Processos);
+                        AtualizarDetalheCpu();
                     }
                 }
+
                 _pSessions.TabValues = new[] { _sessions.Rows.Count.ToString(), visiveisProcessos.ToString() };
                 _pSessions.Invalidate();
 
-                // estado do cartao publicado na janela (lido pela automacao de UI):
-                // quantas sessoes, quantos processos e quantas linhas na lista
+                _side.SetBadge(_navSessoes, _sessions.Rows.Count.ToString());
+                _side.SetBadge(_navCpu, visiveisProcessos > 0 ? visiveisProcessos.ToString() : "");
+                _side.SetBadge(_navJanelas, _windows.Rows.Count.ToString());
+
                 string ts = "cartao_sessoes|linhas=" + _sessions.Rows.Count + "|" +
                             string.Join(",", _sessions.Rows.Take(12).Select(r => r.Script)) +
                             "|cpu=" + visiveisProcessos + "|cpu_linhas=" + _cpuLinhas +
                             "|cpu_nomes=" + string.Join(",", _cpu.Tabela.Rows.Take(10).Select(r => r.Name));
                 if (_pSessions.Text != ts) _pSessions.Text = ts;
 
-                // memoria da maquina em tempo real (uma chamada barata)
                 MemInfo mem;
                 if (MemoriaSistema.Ler(out mem))
                 {
                     _memPct = mem.Porcentagem;
-                    _memUsado = mem.Usado;
-                    _memTotal = mem.Total;
-                    _stats.Labels[3] = Lang.T("v2StatMem") + " · " + HumanFormat.Memoria(mem.Usado);
+                    _stats.SubLabels[3] = HumanFormat.Memoria(mem.Usado) + " / " + HumanFormat.Memoria(mem.Total);
                 }
+                _stats.SubLabels[2] = Lang.F("v2SubCpu", visiveisProcessos);
+                _stats.CpuPercent = _cpuTotal;
+                _stats.MemPercent = _memPct;
 
-                // estatisticas: valores reais do motor
                 int ativas = 0;
                 foreach (SessionRow r in _rows) if (!r.Closed) ativas++;
                 TimeSpan t = DateTime.Now - _inicio;
                 _stats.Values = new[]
                 {
-                    ativas.ToString(), _totalWindows.ToString(), _cpuTotal.ToString("0.0") + "%",
+                    ativas.ToString(),
+                    _totalWindows.ToString(),
+                    _cpuTotal.ToString("0.0") + "%",
                     _memPct.ToString("0.0") + "%",
                     _totalSteps.ToString(),
                     ((int)t.TotalHours).ToString("00") + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00")
@@ -1473,29 +1617,26 @@ namespace CmdWatch.Gui
             catch { }
         }
 
-        /// <summary>Copia da linha do retrato (o detalhe preenche usuario e integridade).</summary>
-        private static CpuRow CopiaCpu(CpuRow r)        {
-            CpuRow c = new CpuRow();
-            c.Pid = r.Pid;
-            c.ParentPid = r.ParentPid;
-            c.Name = r.Name;
-            c.CmdLine = r.CmdLine;
-            c.Path = r.Path;
-            c.Cpu = r.Cpu;
-            c.CpuMedia = r.CpuMedia;
-            c.MemBytes = r.MemBytes;
-            c.Threads = r.Threads;
-            c.StartedAt = r.StartedAt;
-            c.SessionId = r.SessionId;
-            c.User = r.User;
-            c.Elevado = r.Elevado;
-            return c;
+        private static CpuRow CopiaCpu(CpuRow r)
+        {
+            return new CpuRow
+            {
+                Pid = r.Pid,
+                ParentPid = r.ParentPid,
+                Name = r.Name,
+                CmdLine = r.CmdLine,
+                Path = r.Path,
+                Cpu = r.Cpu,
+                CpuMedia = r.CpuMedia,
+                MemBytes = r.MemBytes,
+                Threads = r.Threads,
+                StartedAt = r.StartedAt,
+                SessionId = r.SessionId,
+                User = r.User,
+                Elevado = r.Elevado
+            };
         }
 
-        /// <summary>
-        /// Dono de um processo (usuario e integridade), guardado por PID + hora
-        /// de inicio - o PID sozinho nao serve: o Windows o recicla.
-        /// </summary>
         private sealed class CpuUser
         {
             public string User = "";

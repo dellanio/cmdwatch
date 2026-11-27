@@ -11,6 +11,7 @@ namespace CmdWatch.Gui
     /// </summary>
     internal static class ScrollTheme
     {
+        public static readonly Color Track;
         public static readonly Color Thumb;
         public static readonly Color ThumbActive;
         public static readonly Color ThumbHot;
@@ -18,39 +19,21 @@ namespace CmdWatch.Gui
 
         static ScrollTheme()
         {
-            // segue o tema do painel (que segue o do Windows, ou CMDWATCH_TEMA)
             Dark = Theme.Dark;
             if (Dark)
             {
-                // Windows 11 escuro
-                Thumb = Color.FromArgb(0x4D, 0x4D, 0x4D);
-                ThumbHot = Color.FromArgb(0x5C, 0x5C, 0x5C);
-                ThumbActive = Color.FromArgb(0x6E, 0x6E, 0x6E);
+                Track = Color.FromArgb(0x11, 0x11, 0x11);
+                Thumb = Color.FromArgb(0x2F, 0x2F, 0x2F);
+                ThumbHot = Theme.Teal;
+                ThumbActive = Theme.AcidHover;
             }
             else
             {
-                // Windows 11 claro
-                Thumb = Color.FromArgb(0xC8, 0xC8, 0xC8);
-                ThumbHot = Color.FromArgb(0xD6, 0xD6, 0xD6);
-                ThumbActive = Color.FromArgb(0xB4, 0xB4, 0xB4);
+                Track = Color.FromArgb(0xEE, 0xEE, 0xEA);
+                Thumb = Color.FromArgb(0xB8, 0xB8, 0xB2);
+                ThumbHot = Theme.Teal;
+                ThumbActive = Theme.Teal;
             }
-        }
-
-        /// <summary>Le o tema de aplicativos do Windows (0 = escuro).</summary>
-        private static bool IsWindowsDark()
-        {
-            try
-            {
-                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser
-                    .OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
-                {
-                    if (k == null) return true;
-                    object v = k.GetValue("AppsUseLightTheme");
-                    if (v == null) return true;
-                    return Convert.ToInt32(v) == 0;
-                }
-            }
-            catch { return true; }
         }
     }
 }

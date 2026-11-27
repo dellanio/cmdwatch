@@ -7,85 +7,150 @@ using System.Windows.Forms;
 namespace CmdWatch.Gui
 {
     /// <summary>
-    /// Paleta e tipografia do painel. Visual limpo: fundo cinza muito claro,
-    /// cartoes brancos de cantos arredondados, texto quase preto, um unico azul
-    /// de destaque e cores de estado (verde, laranja, vermelho, cinza). Segue o
-    /// O padrao e o tema escuro; CMDWATCH_TEMA=claro troca para a paleta clara.
-    /// Os nomes antigos (Cyan, Panel, PanelDeep...) foram mantidos como papeis:
-    /// Cyan e o destaque, Panel e o cartao, PanelDeep o fundo das listas.
+    /// Paleta e tipografia do painel no sistema visual Hoody / Neo-Brutalista:
+    /// cantos 100% retos (0px radius), bordas estruturais de 1px, fundo grafite
+    /// arquitetonico (#111111) e amarelo acido (#E2FF26) como destaque primario.
+    /// CMDWATCH_TEMA=claro mantem uma variante clara de alto contraste.
     /// </summary>
     internal static class Theme
     {
         public static readonly bool Dark;
 
         public static readonly Color Bg, Panel, PanelDeep, Border, Grid, Text, Dim;
+        public static readonly Color Surface, Sidebar, TopBar, HeaderBg, LineSubtle, OnAcid, AcidHover;
         public static readonly Color Cyan, Green, Red, Amber, Blue, Purple, Magenta, Yellow;
-        /// <summary>Fundo da linha sob o mouse e cor dos controles "pilula" inativos.</summary>
         public static readonly Color Hover, Fill, Gray;
-        /// <summary>Verde-agua de destaque: item ativo, selecao, icones das estatisticas.</summary>
-        public static readonly Color Teal = Color.FromArgb(0x2D, 0xD4, 0xA0);
+        /// <summary>Destaque primario (Acid Yellow #E2FF26 no escuro).</summary>
+        public static readonly Color Teal;
 
-        public static readonly Font Ui, UiBold, UiTitle, UiHeader, UiSmall, Mono, MonoSmall;
-        /// <summary>Numeros grandes das estatisticas, titulo da pagina e icones (Segoe Fluent Icons / MDL2).</summary>
+        public static readonly Font Ui, UiBold, UiTitle, UiHeader, UiSmall, Mono, MonoSmall, MonoBold, MonoTiny;
         public static readonly Font UiStat, UiPage, IconFont, IconBig;
 
         static Theme()
         {
             string forcado = (Environment.GetEnvironmentVariable("CMDWATCH_TEMA") ?? "").Trim().ToLowerInvariant();
             if (forcado == "claro" || forcado == "light") Dark = false;
-            else Dark = true;   // escuro e o visual padrao do painel; claro so por CMDWATCH_TEMA=claro
+            else Dark = true;
 
             if (Dark)
             {
-                // azul-marinho quase preto, cartoes um tom acima com borda fina,
-                // verde-agua como destaque (estados ativos) e azul para comandos
-                Bg = Rgb(0x0B1117); Panel = Rgb(0x111820); PanelDeep = Rgb(0x111820);
-                Border = Rgb(0x1E2A33); Grid = Rgb(0x1A242D); Text = Rgb(0xE6EDF3); Dim = Rgb(0x8B98A5);
-                Cyan = Rgb(0x3B82F6); Green = Rgb(0x34D399); Red = Rgb(0xEF4444); Amber = Rgb(0xF5B544);
-                Blue = Rgb(0x60A5FA); Purple = Rgb(0xA78BFA); Magenta = Rgb(0xF472B6); Yellow = Rgb(0xFACC15);
-                Hover = Rgb(0x16202A); Fill = Rgb(0x18222C); Gray = Rgb(0x6B7785);
+                Bg = Rgb(0x111111);          // charcoal
+                Surface = Rgb(0x141414);     // surface / KPIs / rail
+                Sidebar = Rgb(0x161616);     // left sidebar
+                TopBar = Rgb(0x181818);      // topbar
+                HeaderBg = Rgb(0x141414);    // card header
+                Panel = Rgb(0x171717);       // panel
+                PanelDeep = Rgb(0x0E0E0E);   // terminal
+                Border = Rgb(0x2A2A2A);      // structural 1px line
+                LineSubtle = Rgb(0x222222);  // table row separator
+                Grid = Rgb(0x242424);        // subtle grid / dashed line
+                Text = Rgb(0xFFFFFF);        // crisp white
+                Dim = Rgb(0x8A8A8A);         // muted
+                Gray = Rgb(0x666666);        // dim
+
+                Teal = Rgb(0xE2FF26);        // acid yellow
+                AcidHover = Rgb(0xEEFF66);
+                OnAcid = Rgb(0x0D0D0D);
+
+                Cyan = Rgb(0xE2FF26);        // primario unificado no acido
+                Green = Rgb(0xE2FF26);
+                Red = Rgb(0xFF4D4D);
+                Amber = Rgb(0xFFB020);
+                Blue = Rgb(0xE2FF26);
+                Purple = Rgb(0xCCCCCC);
+                Magenta = Rgb(0xFF6B9D);
+                Yellow = Rgb(0xE2FF26);
+
+                Hover = Rgb(0x1D1D1D);
+                Fill = Rgb(0x121212);
             }
             else
             {
-                Bg = Rgb(0xF5F5F7); Panel = Rgb(0xFFFFFF); PanelDeep = Rgb(0xFFFFFF);
-                Border = Rgb(0xE3E3E8); Grid = Rgb(0xEDEDF0); Text = Rgb(0x1D1D1F); Dim = Rgb(0x6E6E73);
-                // tons um pouco mais escuros que os de sistema: texto colorido legivel sobre branco
-                Cyan = Rgb(0x007AFF); Green = Rgb(0x1F9D4C); Red = Rgb(0xE5342A); Amber = Rgb(0xC77700);
-                Blue = Rgb(0x0A6CC2); Purple = Rgb(0x9944C8); Magenta = Rgb(0xD12B5A); Yellow = Rgb(0x9A7400);
-                Hover = Rgb(0xF2F2F7); Fill = Rgb(0xE9E9ED); Gray = Rgb(0xAEAEB2);
+                Bg = Rgb(0xF2F2EE);
+                Surface = Rgb(0xFAFAF7);
+                Sidebar = Rgb(0xEAEAE4);
+                TopBar = Rgb(0xFFFFFF);
+                HeaderBg = Rgb(0xF4F4F0);
+                Panel = Rgb(0xFFFFFF);
+                PanelDeep = Rgb(0xF7F7F3);
+                Border = Rgb(0xCCCCCC);
+                LineSubtle = Rgb(0xE2E2DC);
+                Grid = Rgb(0xDDDDD6);
+                Text = Rgb(0x111111);
+                Dim = Rgb(0x5A5A5A);
+                Gray = Rgb(0x888888);
+
+                Teal = Rgb(0x111111);
+                AcidHover = Rgb(0x2B2B2B);
+                OnAcid = Rgb(0xE2FF26);
+
+                Cyan = Rgb(0x111111);
+                Green = Rgb(0x15803D);
+                Red = Rgb(0xDC2626);
+                Amber = Rgb(0xB45309);
+                Blue = Rgb(0x1D4ED8);
+                Purple = Rgb(0x6D28D9);
+                Magenta = Rgb(0xBE185D);
+                Yellow = Rgb(0x854D0E);
+
+                Hover = Rgb(0xEDEDEA);
+                Fill = Rgb(0xEAEAE5);
             }
 
-            string sans = Existe("Segoe UI Variable Text") ? "Segoe UI Variable Text" : "Segoe UI";
-            string semi = Existe("Segoe UI Semibold") ? "Segoe UI Semibold" : "Segoe UI";
-            string mono = Existe("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
-            Ui = new Font(sans, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-            UiSmall = new Font(sans, 8.25f, FontStyle.Regular, GraphicsUnit.Point);
-            UiBold = new Font(semi, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-            UiTitle = new Font(semi, 11.5f, FontStyle.Regular, GraphicsUnit.Point);
-            UiHeader = new Font(semi, 14f, FontStyle.Regular, GraphicsUnit.Point);
+            string sans = PickFont("Space Grotesk", "Bahnschrift", "Segoe UI Variable Text", "Segoe UI");
+            string semi = PickFont("Space Grotesk", "Bahnschrift SemiBold", "Segoe UI Semibold", "Segoe UI");
+            string disp = PickFont("Space Grotesk", "Bahnschrift", "Segoe UI Variable Display", "Segoe UI");
+            string mono = PickFont("JetBrains Mono", "Cascadia Mono", "Consolas");
+            string icones = Existe("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+
+            Ui = new Font(sans, 9.25f, FontStyle.Regular, GraphicsUnit.Point);
+            UiSmall = new Font(mono, 8f, FontStyle.Regular, GraphicsUnit.Point);
+            UiBold = new Font(semi, 9.25f, FontStyle.Bold, GraphicsUnit.Point);
+            UiTitle = new Font(mono, 8.75f, FontStyle.Bold, GraphicsUnit.Point);
+            UiHeader = new Font(disp, 13f, FontStyle.Bold, GraphicsUnit.Point);
+
             Mono = new Font(mono, 9f, FontStyle.Regular, GraphicsUnit.Point);
             MonoSmall = new Font(mono, 8.25f, FontStyle.Regular, GraphicsUnit.Point);
-            string bold = Existe("Segoe UI Variable Display") ? "Segoe UI Variable Display" : "Segoe UI";
-            UiStat = new Font(bold, 14f, FontStyle.Bold, GraphicsUnit.Point);
-            UiPage = new Font(bold, 18f, FontStyle.Bold, GraphicsUnit.Point);
-            string icones = Existe("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
-            IconFont = new Font(icones, 10f, FontStyle.Regular, GraphicsUnit.Point);
-            IconBig = new Font(icones, 16f, FontStyle.Regular, GraphicsUnit.Point);
+            MonoBold = new Font(mono, 8.25f, FontStyle.Bold, GraphicsUnit.Point);
+            MonoTiny = new Font(mono, 7.5f, FontStyle.Regular, GraphicsUnit.Point);
+
+            UiStat = new Font(disp, 19f, FontStyle.Bold, GraphicsUnit.Point);
+            UiPage = new Font(disp, 15f, FontStyle.Bold, GraphicsUnit.Point);
+            IconFont = new Font(icones, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+            IconBig = new Font(icones, 11.5f, FontStyle.Regular, GraphicsUnit.Point);
         }
 
-        /// <summary>Desenha um icone (glifo da fonte de icones do Windows) centrado em r.</summary>
+        private static string PickFont(params string[] candidatas)
+        {
+            foreach (string c in candidatas)
+                if (Existe(c)) return c;
+            return "Segoe UI";
+        }
+
         public static void DrawIcon(Graphics g, string glyph, Rectangle r, Color c, Font f = null)
         {
             TextRenderer.DrawText(g, glyph, f ?? IconFont, r, c,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
-        /// <summary>Pilula de estado com contorno e fundo translucido na cor do estado.</summary>
+        /// <summary>Badge neo-brutalista: retangulo vivo com quadrado indicador de 5px e rotulo em caixa alta.</summary>
         public static void DrawPill(Graphics g, Rectangle r, string text, Color c, bool filled)
         {
-            DrawPanel(g, r, r.Height / 2, Color.FromArgb(filled ? 40 : 26, c), Color.FromArgb(filled ? 200 : 90, c));
-            TextRenderer.DrawText(g, text, UiSmall, r, filled ? c : Dim,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            Color bg = filled ? Color.FromArgb(Dark ? 28 : 18, c) : PanelDeep;
+            Color bd = filled ? Color.FromArgb(Dark ? 170 : 140, c) : Border;
+            Color fg = filled ? c : Dim;
+            DrawPanel(g, r, 0, bg, bd);
+
+            string up = (text ?? "").ToUpperInvariant();
+            int dot = 5;
+            int dx = r.X + 7;
+            int dy = r.Y + (r.Height - dot) / 2;
+            using (SolidBrush b = new SolidBrush(filled ? c : Gray))
+                g.FillRectangle(b, dx, dy, dot, dot);
+
+            Rectangle tr = new Rectangle(dx + dot + 5, r.Y, Math.Max(4, r.Right - (dx + dot + 8)), r.Height);
+            TextRenderer.DrawText(g, up, MonoTiny, tr, fg,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         }
 
         private static Color Rgb(int v) { return Color.FromArgb((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF); }
@@ -94,15 +159,12 @@ namespace CmdWatch.Gui
         {
             try
             {
-                // o construtor de Font cai silenciosamente em outra fonte:
-                // so aceita quando o nome devolvido e o mesmo pedido
                 using (Font f = new Font(familia, 9f))
                     return string.Equals(f.Name, familia, StringComparison.OrdinalIgnoreCase);
             }
             catch { return false; }
         }
 
-        /// <summary>Le o tema de aplicativos do Windows (AppsUseLightTheme = 0 e escuro).</summary>
         internal static bool WindowsEscuro()
         {
             try
@@ -119,68 +181,62 @@ namespace CmdWatch.Gui
             catch { return false; }
         }
 
-        /// <summary>Fonte dos titulos das secoes (antes Bahnschrift; agora a mesma familia da interface).</summary>
         public static Font TitleFont { get { return UiTitle; } }
 
         public static GraphicsPath RoundRect(Rectangle r, int radius)
         {
             GraphicsPath p = new GraphicsPath();
-            if (radius < 1) radius = 1;
-            int d = radius * 2;
-            if (d > r.Width) d = Math.Max(2, r.Width);
-            if (d > r.Height) d = Math.Max(2, r.Height);
-            p.AddArc(r.X, r.Y, d, d, 180, 90);
-            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            p.CloseFigure();
+            p.AddRectangle(r);
             return p;
         }
 
-        /// <summary>Superficie arredondada chapada com borda fina (sem gradiente).</summary>
+        /// <summary>Superficie estritamente retangular (0px border-radius) com borda de 1px.</summary>
         public static void DrawPanel(Graphics g, Rectangle r, int radius, Color fill, Color border)
         {
-            SmoothingMode antes = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath path = RoundRect(r, radius))
+            if (r.Width <= 0 || r.Height <= 0) return;
+            if (fill.A > 0)
             {
-                using (SolidBrush b = new SolidBrush(fill)) g.FillPath(b, path);
-                if (border.A > 0) using (Pen p = new Pen(border)) g.DrawPath(p, path);
+                using (SolidBrush b = new SolidBrush(fill))
+                    g.FillRectangle(b, r.X, r.Y, r.Width + (border.A == 0 ? 1 : 0), r.Height + (border.A == 0 ? 1 : 0));
             }
-            g.SmoothingMode = antes;
+            if (border.A > 0)
+            {
+                using (Pen p = new Pen(border, 1f))
+                    g.DrawRectangle(p, r.X, r.Y, r.Width, r.Height);
+            }
         }
 
-        /// <summary>Cartao: superficie branca com sombra suave por baixo (no escuro, so a borda).</summary>
         public static void DrawCard(Graphics g, Rectangle r, int radius)
         {
-            SmoothingMode antes = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            if (!Dark)
-            {
-                // sombra: dois contornos translucidos deslocados para baixo
-                for (int i = 2; i >= 1; i--)
-                {
-                    Rectangle s = new Rectangle(r.X, r.Y + i, r.Width, r.Height);
-                    using (GraphicsPath sp = RoundRect(s, radius))
-                    using (SolidBrush sb = new SolidBrush(Color.FromArgb(i == 1 ? 14 : 8, 0, 0, 0)))
-                        g.FillPath(sb, sp);
-                }
-            }
-            using (GraphicsPath path = RoundRect(r, radius))
-            {
-                using (SolidBrush b = new SolidBrush(Panel)) g.FillPath(b, path);
-                using (Pen p = new Pen(Dark ? Border : Color.FromArgb(0xE6, 0xE6, 0xEA))) g.DrawPath(p, path);
-            }
-            g.SmoothingMode = antes;
+            DrawPanel(g, r, 0, Panel, Border);
         }
 
-        /// <summary>Bolinha de estado (verde = ativo, laranja = escondido, cinza = encerrado).</summary>
+        /// <summary>Marcador geometrico quadrado (substitui as bolinhas arredondadas no tema Hoody).</summary>
         public static void DrawDot(Graphics g, int cx, int cy, int d, Color c)
         {
-            SmoothingMode antes = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (SolidBrush b = new SolidBrush(c)) g.FillEllipse(b, cx - d / 2f, cy - d / 2f, d, d);
-            g.SmoothingMode = antes;
+            int s = Math.Max(4, d - 1);
+            using (SolidBrush b = new SolidBrush(c))
+                g.FillRectangle(b, cx - s / 2, cy - s / 2, s, s);
+        }
+
+        /// <summary>Grade arquitetonica de 40x40px com mira discreta nos cruzamentos.</summary>
+        public static void DrawArchGrid(Graphics g, Rectangle area)
+        {
+            if (!Dark || area.Width <= 0 || area.Height <= 0) return;
+            const int step = 40;
+            using (Pen linePen = new Pen(Color.FromArgb(9, 255, 255, 255), 1f))
+            using (SolidBrush crossBrush = new SolidBrush(Color.FromArgb(32, 255, 255, 255)))
+            {
+                int xStart = (area.Left / step) * step;
+                int yStart = (area.Top / step) * step;
+                for (int x = xStart; x <= area.Right; x += step)
+                    g.DrawLine(linePen, x, area.Top, x, area.Bottom);
+                for (int y = yStart; y <= area.Bottom; y += step)
+                    g.DrawLine(linePen, area.Left, y, area.Right, y);
+                for (int x = xStart; x <= area.Right; x += step)
+                    for (int y = yStart; y <= area.Bottom; y += step)
+                        g.FillRectangle(crossBrush, x, y, 1, 1);
+            }
         }
 
         public static Color Lighten(Color c, float t)
@@ -194,9 +250,9 @@ namespace CmdWatch.Gui
         public static Color Darken(Color c, float t)
         {
             return Color.FromArgb(c.A,
-                (int)Math.Max(0, c.R - (255 - c.R) * t),
-                (int)Math.Max(0, c.G - (255 - c.G) * t),
-                (int)Math.Max(0, c.B - (255 - c.B) * t));
+                (int)Math.Max(0, c.R - c.R * t),
+                (int)Math.Max(0, c.G - c.G * t),
+                (int)Math.Max(0, c.B - c.B * t));
         }
 
         public static Color Mix(Color a, Color b, double t)
@@ -209,32 +265,25 @@ namespace CmdWatch.Gui
                 (int)(a.B + (b.B - a.B) * t));
         }
 
-        /// <summary>Cor de cada papel de linha no fluxo de comandos.</summary>
         public static Color FlowColor(HumanRole role)
         {
             switch (role)
             {
-                case HumanRole.Open: return Cyan;
-                case HumanRole.Call: return Purple;
+                case HumanRole.Open: return Teal;
+                case HumanRole.Call: return Teal;
                 case HumanRole.Step: return Amber;
-                case HumanRole.Close: return Green;
-                case HumanRole.Banner: return Cyan;
+                case HumanRole.Close: return Color.FromArgb(0xCC, 0xCC, 0xCC);
+                case HumanRole.Banner: return Teal;
                 default: return Text;
             }
         }
 
-        /// <summary>Desenha o polegar de uma barra de rolagem (ponta arredondada).</summary>
+        /// <summary>Polegar retangular da barra de rolagem (6px, hover em amarelo acido).</summary>
         public static void DrawScrollThumb(Graphics g, Rectangle r, Color fill)
         {
             if (r.Width <= 0 || r.Height <= 0) return;
-            int radius = r.Width / 2;
-            if (radius < 2) radius = 2;
-            SmoothingMode antes = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath p = RoundRect(r, radius))
             using (SolidBrush b = new SolidBrush(fill))
-                g.FillPath(b, p);
-            g.SmoothingMode = antes;
+                g.FillRectangle(b, r);
         }
     }
 
