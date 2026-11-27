@@ -1,13 +1,15 @@
 <div align="center">
 
-# ⚡ CMDWatcher (cmdwatch)
+<img src="assets/icon-preview.png" alt="Ícone do CMDWatcher" width="128" />
+
+# CMDWatcher (cmdwatch)
 
 **Monitor de execução em tempo real e rastreador de janelas e scripts `.cmd`/`.bat` para Windows 10/11**
 
 [![Plataforma](https://img.shields.io/badge/Plataforma-Windows%2010%20%7C%2011-0078D6.svg?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Runtime](https://img.shields.io/badge/Runtime-.NET%20Framework%204.8%20(Nativo)-512BD4.svg?style=flat&logo=dotnet)](https://dotnet.microsoft.com)
 [![Linguagem](https://img.shields.io/badge/Linguagem-C%23-239120.svg?style=flat&logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
-[![Binário](https://img.shields.io/badge/Binário-EXE%20Único%20(~600KB)%20%7C%20Portátil-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
+[![Binário](https://img.shields.io/badge/Binário-EXE%20Único%20(~370KB)%20%7C%20Portátil-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
 [![Privilégios](https://img.shields.io/badge/Privilégios-Sem%20Admin%20Obrigatório-blue.svg?style=flat)](https://github.com/dellanio/cmdwatch)
 [![Licença](https://img.shields.io/badge/Licença-MIT-green.svg?style=flat)](LICENSE)
 
@@ -24,7 +26,7 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center"><b>Painel Gráfico em Tempo Real (Tema Escuro / Neon)</b></td>
+      <td align="center"><b>Painel Industrial em Tempo Real (Tema Escuro, estilo Hoody)</b></td>
       <td align="center"><b>Encerramento Seguro de Processos com Confirmação</b></td>
     </tr>
     <tr>
@@ -109,7 +111,8 @@ O **CMDWatcher** (`cmdwatch`) é um monitor leve e sem dependências para Window
 - 🙈 **Esconder os processos do Windows:** o botão "Esconder Windows" tira da lista tudo que é do sistema (`C:\Windows` e os serviços protegidos) e deixa só o que você instalou por fora — 635 processos viram 356 numa máquina comum, em ~15 ms na primeira vez e nada depois.
 - 📐 **Painel ajustável:** as colunas das tabelas (nas duas abas) e a divisória entre a lista e o detalhe podem ser redimensionadas arrastando com o mouse.
 - 📦 **Instala pelo Scoop e pelo winget:** os dois gerenciadores entregam o executável **sem** o aviso do SmartScreen e sem pedir instalação — o `cmdwatch` fica no `PATH`.
-- 🎨 **Interface Neon Customizada:** Construída em GDI+ puro sem frameworks pesados, com suporte a tema escuro/claro, busca em tempo real, ordenação de colunas e minimização para a Área de Notificação (Tray).
+- 🎨 **Interface Industrial (estilo Hoody):** GDI+ puro, plana e de cantos retos — destaque amarelo ácido `#E2FF26` sobre fundo grafite, bordas estruturais de 1 px, barra lateral retrátil com contadores ao vivo, barra superior com busca global e Pausar/Retomar, e faixa de indicadores (sessões, janelas, CPU, memória, comandos, tempo ativo). Escuro por padrão; há uma variante clara de alto contraste com `CMDWATCH_TEMA=claro`.
+- 🧰 **Utilitários reais, nada simulado:** um trilho à direita e uma gaveta de configurações com **Fixar no topo** (pin), **grade arquitetônica 40×40 px**, **Exportar log** (salva o fluxo atual) / **Abrir log** e **Minimizar para a bandeja**. Cada escolha é lembrada entre execuções.
 
 ---
 
@@ -136,7 +139,7 @@ flowchart TD
     end
 
     subgraph Output ["Interfaces do Usuário"]
-        GUI["Dashboard Visual Neon (WinForms / GDI+)"]
+        GUI["Dashboard Industrial (WinForms / GDI+)"]
         CLI["CLI Host (monitor / analyze / trace)"]
         JSONL["Log Estruturado cmdwatch-log.jsonl"]
     end
@@ -157,7 +160,7 @@ flowchart TD
 ```
 
 - **Linguagem:** C# (.NET Framework 4.8)
-- **UI Toolkit:** Windows Forms com renderização sob demanda GDI+ (Dark / Light)
+- **UI Toolkit:** Windows Forms com renderização GDI+ sob demanda (tema escuro estilo Hoody, variante clara sob pedido) — sem DLLs extras
 - **APIs Nativas:** `kernel32.dll`, `user32.dll`, `ntdll.dll` (`NtQueryInformationProcess`), `advapi32.dll` (ETW)
 - **Build System:** Script autônomo PowerShell (`build.ps1`) com compilador Roslyn embutido
 

@@ -1,13 +1,15 @@
 <div align="center">
 
-# ⚡ CMDWatcher (cmdwatch)
+<img src="assets/icon-preview.png" alt="CMDWatcher icon" width="128" />
+
+# CMDWatcher (cmdwatch)
 
 **Real-time execution monitor & window author tracer for `.cmd`/`.bat` scripts and background processes on Windows 10/11**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Runtime](https://img.shields.io/badge/Runtime-.NET%20Framework%204.8%20(Built--in)-512BD4.svg?style=flat&logo=dotnet)](https://dotnet.microsoft.com)
 [![Language](https://img.shields.io/badge/Language-C%23-239120.svg?style=flat&logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
-[![Binary](https://img.shields.io/badge/Binary-Single%20EXE%20(~600KB)%20%7C%20Portable-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
+[![Binary](https://img.shields.io/badge/Binary-Single%20EXE%20(~370KB)%20%7C%20Portable-success.svg?style=flat)](https://github.com/dellanio/cmdwatch/releases)
 [![Privileges](https://img.shields.io/badge/Privileges-No%20Admin%20Required-blue.svg?style=flat)](https://github.com/dellanio/cmdwatch)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](LICENSE)
 
@@ -24,7 +26,7 @@
 <div align="center">
   <table>
     <tr>
-      <td align="center"><b>Modern Real-Time Neon Dashboard (Dark Theme)</b></td>
+      <td align="center"><b>Industrial Real-Time Dashboard (Dark, Hoody-style)</b></td>
       <td align="center"><b>Safe Process Termination with PID Guard</b></td>
     </tr>
     <tr>
@@ -109,7 +111,8 @@ With the widespread adoption of **autonomous AI agents, background automation sc
 - 🙈 **Hide the Windows processes:** the "Hide Windows" button takes everything from the system out of the list (`C:\Windows` and the protected services) and leaves only what you installed yourself — 635 processes become 356 on a normal machine, in ~15 ms the first time and nothing after that.
 - 📐 **Adjustable panel:** the table columns (in both tabs) and the divider between the list and the detail can be resized by dragging with the mouse.
 - 📦 **Installs through Scoop and winget:** both package managers deliver the executable **without** the SmartScreen warning and without an installer — `cmdwatch` ends up on the `PATH`.
-- 🎨 **Custom Neon UI:** Lightweight GDI+ rendering with Dark and Light themes, real-time search, sortable columns, and background minimization to the Windows System Tray.
+- 🎨 **Industrial UI (Hoody-style):** flat, square-cornered GDI+ interface — acid-yellow `#E2FF26` accent on charcoal, 1 px structural borders, a collapsible sidebar with live counters, a top bar with global search and Pause/Resume, and a stat strip (sessions, windows, CPU, memory, commands, uptime). Dark by default; a high-contrast light variant is available with `CMDWATCH_TEMA=claro`.
+- 🧰 **Real utilities, nothing simulated:** a right-hand rail and a settings drawer with **Always on top** (pin), the **40×40 px architectural grid** toggle, **Export log** (saves the current stream) / **Open log**, and **Minimize to tray**. Every choice is remembered between runs.
 
 ---
 
@@ -136,7 +139,7 @@ flowchart TD
     end
 
     subgraph Output ["User Interfaces & Storage"]
-        GUI["Modern Neon Dashboard (WinForms / GDI+)"]
+        GUI["Industrial Dashboard (WinForms / GDI+)"]
         CLI["CLI Host (monitor / analyze / trace)"]
         JSONL["Structured cmdwatch-log.jsonl"]
     end
@@ -157,7 +160,7 @@ flowchart TD
 ```
 
 - **Language:** C# (.NET Framework 4.8)
-- **UI Toolkit:** Pure Windows Forms with custom GDI+ drawing (Dark / Light)
+- **UI Toolkit:** Pure Windows Forms with custom GDI+ drawing (Hoody-style dark theme, light variant on request) — no extra DLLs
 - **Native APIs:** `kernel32.dll`, `user32.dll`, `ntdll.dll` (`NtQueryInformationProcess`), `advapi32.dll` (ETW)
 - **Build System:** Self-bootstrapping PowerShell script (`build.ps1`) using Roslyn compiler
 
