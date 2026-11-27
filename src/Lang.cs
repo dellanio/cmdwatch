@@ -291,7 +291,7 @@ namespace CmdWatch
 
         static Lang()
         {
-            Atual = Idioma.PtBr;
+            Atual = Idioma.En;
         }
 
         public static void Set(Idioma idioma)
@@ -367,7 +367,7 @@ namespace CmdWatch
                 {
                     if (!line.StartsWith("lang=", StringComparison.OrdinalIgnoreCase)) continue;
                     string v = line.Substring(5).Trim();
-                    Atual = v.Equals("en", StringComparison.OrdinalIgnoreCase) ? Idioma.En : Idioma.PtBr;
+                    Atual = v.StartsWith("pt", StringComparison.OrdinalIgnoreCase) ? Idioma.PtBr : Idioma.En;
                 }
             }
             catch { }

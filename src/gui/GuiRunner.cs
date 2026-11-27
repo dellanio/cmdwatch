@@ -16,7 +16,7 @@ namespace CmdWatch.Gui
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // idioma escolhido na ultima execucao (padrao: PT-BR)
+            // idioma escolhido na ultima execucao (padrao: EN)
             Lang.Load();
 
             using (DashboardForm form = new DashboardForm(o))
